@@ -82,11 +82,13 @@ export default async (req: Request, _context: Context) => {
 
     const dictionary = getDictionary();
 
-    // Support two modes:
-    // 1. Raw binary body (Content-Type: audio/* or application/octet-stream)
-    //    - tone/mode/command/text via query params
-    // 2. Multipart form-data (legacy)
-    //    - tone/mode/command/text via form fields
+    // Support three input modes:
+    // 1. JSON with base64 audio (preferred for Apple Shortcuts)
+    //    - { "audio": "base64string", "tone": "auto", "mode": "transcribe" }
+    // 2. Raw binary body (Content-Type: audio/*)
+    //    - tone/mode via query params
+    // 3. Multipart form-data (legacy)
+    //    - tone/mode via form fields
     const contentType = req.headers.get("content-type") || "";
     let audioFile: Blob;
     let mode: Mode;
@@ -94,7 +96,32 @@ export default async (req: Request, _context: Context) => {
     let editText: string | null = null;
     let editCommand: EditCommand | null = null;
 
-    if (contentType.includes("multipart/form-data")) {
+    if (contentType.includes("application/json")) {
+      // JSON with base64-encoded audio
+      let json: Record<string, string>;
+      try {
+        json = await req.json();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return errorResponse(`Invalid JSON: ${msg}`, 400);
+      }
+
+      if (!json.audio) {
+        return errorResponse("Missing 'audio' field in JSON body", 400);
+      }
+
+      console.log(`[WhisperFlow] Base64 audio received: ${json.audio.length} chars`);
+      const binaryString = atob(json.audio);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      audioFile = new Blob([bytes], { type: "audio/m4a" });
+      mode = (json.mode as Mode) || (url.searchParams.get("mode") as Mode) || "transcribe";
+      tone = (json.tone as Tone) || (url.searchParams.get("tone") as Tone) || "auto";
+      editText = json.text || null;
+      editCommand = (json.command as EditCommand) || null;
+    } else if (contentType.includes("multipart/form-data")) {
       // Legacy: multipart form-data
       let formData: FormData;
       try {
