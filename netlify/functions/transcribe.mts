@@ -110,8 +110,10 @@ export default async (req: Request, _context: Context) => {
         return errorResponse("Missing 'audio' field in JSON body", 400);
       }
 
-      console.log(`[WhisperFlow] Base64 audio received: ${json.audio.length} chars`);
-      const binaryString = atob(json.audio);
+      // Strip whitespace/newlines that Apple Shortcuts adds to base64
+      const cleanBase64 = json.audio.replace(/\s/g, "");
+      console.log(`[WhisperFlow] Base64 audio received: ${cleanBase64.length} chars`);
+      const binaryString = atob(cleanBase64);
       const bytes = new Uint8Array(binaryString.length);
       for (let i = 0; i < binaryString.length; i++) {
         bytes[i] = binaryString.charCodeAt(i);
