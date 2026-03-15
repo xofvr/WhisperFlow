@@ -7,9 +7,18 @@ import { TONE_CASUAL_PROMPT } from "../../src/prompts/tone-casual.js";
 import { TONE_PROFESSIONAL_PROMPT } from "../../src/prompts/tone-professional.js";
 import { COMMAND_PROMPTS } from "../../src/prompts/commands.js";
 import type { Mode, Tone, EditCommand, GroqChatMessage } from "../../src/types.js";
-import dictionaryData from "../../config/dictionary.json" with { type: "json" };
 
-const dictionary = loadDictionary(dictionaryData);
+function getDictionary() {
+  return loadDictionary({
+    terms: {
+      groq: "Groq",
+      whisperflow: "WhisperFlow",
+      wisprflow: "WisprFlow",
+      netlify: "Netlify",
+    },
+    promptHints: "Groq, WhisperFlow, WisprFlow, Netlify",
+  });
+}
 
 function errorResponse(message: string, status: number): Response {
   return new Response(JSON.stringify({ error: message }), {
@@ -30,71 +39,11 @@ function getTonePrompt(tone: Tone): string {
   }
 }
 
-async function handleTranscribe(
-  audioBlob: Blob,
-  tone: Tone,
-  apiKey: string
-): Promise<string> {
-  // Step 1: Transcribe with Whisper
-  const rawTranscript = await transcribeAudio(audioBlob, apiKey, {
-    language: "en",
-    promptHints: dictionary.promptHints,
-  });
-
-  if (!rawTranscript.trim()) {
-    return "";
-  }
-
-  // Step 2: Auto-edit with LLM
-  const systemPrompt = AUTO_EDIT_PROMPT + getTonePrompt(tone);
-  const messages: GroqChatMessage[] = [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: rawTranscript },
-  ];
-
-  const cleaned = await processWithLLM(messages, apiKey);
-
-  // Step 3: Apply custom dictionary corrections
-  return applyDictionary(cleaned, dictionary);
-}
-
-async function handleEdit(
-  audioBlob: Blob,
-  text: string,
-  command: EditCommand,
-  apiKey: string
-): Promise<string> {
-  // Step 1: Transcribe the voice instruction
-  const voiceInstruction = await transcribeAudio(audioBlob, apiKey, {
-    language: "en",
-  });
-
-  // Step 2: Build the appropriate prompt
-  const systemPrompt = COMMAND_PROMPTS[command] || COMMAND_PROMPTS.custom;
-
-  let userContent: string;
-  if (command === "custom") {
-    userContent = `Instruction: ${voiceInstruction}\n\nText to edit:\n${text}`;
-  } else {
-    userContent = text;
-  }
-
-  const messages: GroqChatMessage[] = [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: userContent },
-  ];
-
-  const result = await processWithLLM(messages, apiKey);
-  return applyDictionary(result, dictionary);
-}
-
 export default async (req: Request, _context: Context) => {
-  // Only allow POST
   if (req.method !== "POST") {
     return errorResponse("Method not allowed", 405);
   }
 
-  // Auth check
   const secret = Netlify.env.get("WHISPERFLOW_SECRET");
   if (secret) {
     const provided = req.headers.get("x-api-key");
@@ -108,11 +57,12 @@ export default async (req: Request, _context: Context) => {
     return errorResponse("GROQ_API_KEY not configured", 500);
   }
 
-  // Parse multipart form data
+  const dictionary = getDictionary();
+
   let formData: FormData;
   try {
     formData = await req.formData();
-  } catch {
+  } catch (_e) {
     return errorResponse("Invalid form data. Send multipart/form-data with an 'audio' field.", 400);
   }
 
@@ -133,9 +83,46 @@ export default async (req: Request, _context: Context) => {
       if (!text) {
         return errorResponse("Edit mode requires a 'text' field", 400);
       }
-      result = await handleEdit(audioFile, text, command, apiKey);
+
+      const voiceInstruction = await transcribeAudio(audioFile, apiKey, {
+        language: "en",
+      });
+
+      const systemPrompt = COMMAND_PROMPTS[command] || COMMAND_PROMPTS.custom;
+      let userContent: string;
+      if (command === "custom") {
+        userContent = `Instruction: ${voiceInstruction}\n\nText to edit:\n${text}`;
+      } else {
+        userContent = text;
+      }
+
+      const messages: GroqChatMessage[] = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userContent },
+      ];
+
+      result = await processWithLLM(messages, apiKey);
+      result = applyDictionary(result, dictionary);
     } else {
-      result = await handleTranscribe(audioFile, tone, apiKey);
+      const rawTranscript = await transcribeAudio(audioFile, apiKey, {
+        language: "en",
+        promptHints: dictionary.promptHints,
+      });
+
+      if (!rawTranscript.trim()) {
+        return new Response("", {
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+        });
+      }
+
+      const systemPrompt = AUTO_EDIT_PROMPT + getTonePrompt(tone);
+      const messages: GroqChatMessage[] = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: rawTranscript },
+      ];
+
+      result = await processWithLLM(messages, apiKey);
+      result = applyDictionary(result, dictionary);
     }
 
     return new Response(result, {
