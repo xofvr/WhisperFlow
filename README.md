@@ -27,7 +27,7 @@ iPhone Action Button → Shortcut records audio
 
 ### 1. Deploy to Netlify
 
-[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/YOUR_USERNAME/WhisperFlow)
+[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/xofvr/WhisperFlow)
 
 Or deploy manually:
 ```bash
@@ -63,15 +63,25 @@ See [docs/shortcut-setup.md](docs/shortcut-setup.md) for the step-by-step guide.
 **Headers:**
 - `x-api-key`: Your `WHISPERFLOW_SECRET` value
 
-**Body** (multipart/form-data):
+**Body** (JSON — recommended for Apple Shortcuts):
+
+```json
+{
+  "audio": "<base64-encoded audio>",
+  "tone": "auto",
+  "mode": "transcribe"
+}
+```
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `audio` | Yes | Audio file (m4a, mp3, wav, etc.) |
+| `audio` | Yes | Base64-encoded audio (m4a, mp3, wav, etc.) |
 | `mode` | No | `transcribe` (default) or `edit` |
 | `tone` | No | `auto` (default), `casual`, or `professional` |
 | `text` | Edit mode | The text to edit |
 | `command` | Edit mode | `summarize`, `bullet`, `rewrite`, or `custom` |
+
+Also supports multipart/form-data and raw binary body (with params via query string).
 
 **Response:** Plain text (the transcribed/edited text).
 

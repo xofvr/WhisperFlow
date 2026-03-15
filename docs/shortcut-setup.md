@@ -23,7 +23,23 @@ Open the **Shortcuts** app on your iPhone and tap **+** to create a new shortcut
    - **Start Recording**: Immediately
    - **Finish Recording**: On Tap
 
-### Step 3: Add "Get Contents of URL" Action
+### Step 3: Add "Encode Media" Action
+
+1. Tap **+** to add another action
+2. Search for **Encode Media**
+3. Set input to **Recorded Audio**
+4. Configure:
+   - **Audio Only**: ON
+   - **Format**: M4A
+   - **Speed**: Normal
+
+### Step 4: Add "Base64 Encode" Action
+
+1. Tap **+** to add another action
+2. Search for **Base64 Encode**
+3. Set input to **Encoded Media** (output from Step 3)
+
+### Step 5: Add "Get Contents of URL" Action
 
 1. Tap **+** to add another action
 2. Search for **Get Contents of URL**
@@ -33,28 +49,23 @@ Open the **Shortcuts** app on your iPhone and tap **+** to create a new shortcut
    - **Headers**: Add header
      - Key: `x-api-key`
      - Value: `your-secret-here`
-   - **Request Body**: Form
-     - Add field: Key = `audio`, Value = **Recorded Audio** (tap to select the variable from Step 2), Type = **File**
-     - Add field: Key = `tone`, Value = `auto`, Type = **Text**
+   - **Request Body**: JSON
+     - Add field: Key = `audio`, Value = **Base64 Encoded** (select the variable from Step 4)
+     - Add field: Key = `tone`, Value = `auto`
 
-### Step 4: Add "Copy to Clipboard" Action
+### Step 6: Add "Copy to Clipboard" Action
 
 1. Tap **+** to add another action
 2. Search for **Copy to Clipboard**
-3. Set it to copy **Contents of URL** (the response from Step 3)
+3. Set it to copy **Contents of URL** (the response from Step 5)
 
-### Step 5: Add Notification
+### Step 7: Add Notification
 
 1. Tap **+** to add another action
 2. Search for **Show Notification**
 3. Set the body to **Contents of URL** (shows a preview of the transcribed text)
 
-### Step 6: Add Haptic Feedback (Optional)
-
-1. Tap **+** to add another action
-2. Search for **Play Sound** or use **Vibrate Device**
-
-### Step 7: Name and Save
+### Step 8: Name and Save
 
 1. Tap the name at the top and rename to **WhisperFlow**
 2. Tap **Done**
@@ -76,7 +87,7 @@ Open the **Shortcuts** app on your iPhone and tap **+** to create a new shortcut
 
 ## Tone Modes
 
-Change the `tone` field value in Step 3 to switch modes:
+Change the `tone` field value in Step 5 to switch modes:
 
 - `auto` — general-purpose cleanup (default)
 - `casual` — conversational tone for messaging apps
