@@ -2,9 +2,7 @@ import type { Context, Config } from "@netlify/functions";
 import { transcribeAudio } from "../../src/groq-whisper.js";
 import { processWithLLM } from "../../src/groq-llm.js";
 import { loadDictionary, applyDictionary } from "../../src/dictionary.js";
-import { AUTO_EDIT_PROMPT } from "../../src/prompts/auto-edit.js";
-import { TONE_CASUAL_PROMPT } from "../../src/prompts/tone-casual.js";
-import { TONE_PROFESSIONAL_PROMPT } from "../../src/prompts/tone-professional.js";
+import { removeFillers } from "../../src/filler-cleanup.js";
 import { COMMAND_PROMPTS } from "../../src/prompts/commands.js";
 import type { Mode, Tone, EditCommand, GroqChatMessage } from "../../src/types.js";
 
@@ -33,18 +31,6 @@ function getEnv(key: string): string | undefined {
     return Netlify.env.get(key) ?? undefined;
   } catch {
     return process.env[key];
-  }
-}
-
-function getTonePrompt(tone: Tone): string {
-  switch (tone) {
-    case "casual":
-      return "\n\n" + TONE_CASUAL_PROMPT;
-    case "professional":
-      return "\n\n" + TONE_PROFESSIONAL_PROMPT;
-    case "auto":
-    default:
-      return "";
   }
 }
 
@@ -210,14 +196,8 @@ export default async (req: Request, _context: Context) => {
         });
       }
 
-      const systemPrompt = AUTO_EDIT_PROMPT + getTonePrompt(tone);
-      const messages: GroqChatMessage[] = [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: rawTranscript },
-      ];
-
-      console.log("[WhisperFlow] Sending to LLM for auto-editing...");
-      result = await processWithLLM(messages, apiKey);
+      console.log("[WhisperFlow] Cleaning up fillers and applying dictionary...");
+      result = removeFillers(rawTranscript);
       result = applyDictionary(result, dictionary);
       console.log(`[WhisperFlow] Final result (${result.length} chars): "${result.substring(0, 200)}"`);
     }
