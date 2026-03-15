@@ -21,6 +21,7 @@ function getDictionary() {
 }
 
 function errorResponse(message: string, status: number): Response {
+  console.error(`[WhisperFlow] Error ${status}: ${message}`);
   return new Response(JSON.stringify({ error: message }), {
     status,
     headers: { "Content-Type": "application/json" },
@@ -40,6 +41,8 @@ function getTonePrompt(tone: Tone): string {
 }
 
 export default async (req: Request, _context: Context) => {
+  console.log(`[WhisperFlow] ${req.method} ${req.url}`);
+
   if (req.method !== "POST") {
     return errorResponse("Method not allowed", 405);
   }
@@ -51,6 +54,7 @@ export default async (req: Request, _context: Context) => {
       return errorResponse("Unauthorized", 401);
     }
   }
+  console.log("[WhisperFlow] Auth passed");
 
   const apiKey = Netlify.env.get("GROQ_API_KEY");
   if (!apiKey) {
@@ -68,11 +72,17 @@ export default async (req: Request, _context: Context) => {
 
   const audioFile = formData.get("audio");
   if (!audioFile || !(audioFile instanceof Blob)) {
-    return errorResponse("Missing 'audio' field in form data", 400);
+    const keys = [...formData.keys()];
+    return errorResponse(`Missing 'audio' field in form data. Received fields: ${keys.join(", ")}`, 400);
   }
+
+  const audioSize = audioFile.size;
+  const audioType = audioFile.type;
+  console.log(`[WhisperFlow] Audio received: ${audioSize} bytes, type: ${audioType}`);
 
   const mode = (formData.get("mode") as Mode) || "transcribe";
   const tone = (formData.get("tone") as Tone) || "auto";
+  console.log(`[WhisperFlow] Mode: ${mode}, Tone: ${tone}`);
 
   try {
     let result: string;
@@ -84,9 +94,13 @@ export default async (req: Request, _context: Context) => {
         return errorResponse("Edit mode requires a 'text' field", 400);
       }
 
+      console.log(`[WhisperFlow] Edit mode: command=${command}, text length=${text.length}`);
+
+      console.log("[WhisperFlow] Transcribing voice instruction...");
       const voiceInstruction = await transcribeAudio(audioFile, apiKey, {
         language: "en",
       });
+      console.log(`[WhisperFlow] Voice instruction: "${voiceInstruction}"`);
 
       const systemPrompt = COMMAND_PROMPTS[command] || COMMAND_PROMPTS.custom;
       let userContent: string;
@@ -101,15 +115,19 @@ export default async (req: Request, _context: Context) => {
         { role: "user", content: userContent },
       ];
 
+      console.log("[WhisperFlow] Sending to LLM for editing...");
       result = await processWithLLM(messages, apiKey);
       result = applyDictionary(result, dictionary);
     } else {
+      console.log("[WhisperFlow] Transcribing audio with Whisper...");
       const rawTranscript = await transcribeAudio(audioFile, apiKey, {
         language: "en",
         promptHints: dictionary.promptHints,
       });
+      console.log(`[WhisperFlow] Raw transcript (${rawTranscript.length} chars): "${rawTranscript.substring(0, 200)}"`);
 
       if (!rawTranscript.trim()) {
+        console.log("[WhisperFlow] Empty transcript, returning empty response");
         return new Response("", {
           headers: { "Content-Type": "text/plain; charset=utf-8" },
         });
@@ -121,16 +139,21 @@ export default async (req: Request, _context: Context) => {
         { role: "user", content: rawTranscript },
       ];
 
+      console.log("[WhisperFlow] Sending to LLM for auto-editing...");
       result = await processWithLLM(messages, apiKey);
       result = applyDictionary(result, dictionary);
+      console.log(`[WhisperFlow] Final result (${result.length} chars): "${result.substring(0, 200)}"`);
     }
 
+    console.log("[WhisperFlow] Success, returning response");
     return new Response(result, {
       headers: { "Content-Type": "text/plain; charset=utf-8" },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    console.error("WhisperFlow error:", message);
+    const stack = err instanceof Error ? err.stack : "";
+    console.error(`[WhisperFlow] FATAL: ${message}`);
+    console.error(`[WhisperFlow] Stack: ${stack}`);
     return errorResponse(message, 502);
   }
 };
