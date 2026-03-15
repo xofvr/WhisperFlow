@@ -28,6 +28,14 @@ function errorResponse(message: string, status: number): Response {
   });
 }
 
+function getEnv(key: string): string | undefined {
+  try {
+    return Netlify.env.get(key) ?? undefined;
+  } catch {
+    return process.env[key];
+  }
+}
+
 function getTonePrompt(tone: Tone): string {
   switch (tone) {
     case "casual":
@@ -41,50 +49,60 @@ function getTonePrompt(tone: Tone): string {
 }
 
 export default async (req: Request, _context: Context) => {
-  console.log(`[WhisperFlow] ${req.method} ${req.url}`);
+  try {
+    console.log(`[WhisperFlow] ${req.method} ${req.url}`);
 
-  if (req.method !== "POST") {
-    return errorResponse("Method not allowed", 405);
-  }
-
-  const secret = Netlify.env.get("WHISPERFLOW_SECRET");
-  if (secret) {
-    const provided = req.headers.get("x-api-key");
-    if (provided !== secret) {
-      return errorResponse("Unauthorized", 401);
+    if (req.method !== "POST") {
+      return errorResponse("Method not allowed", 405);
     }
-  }
-  console.log("[WhisperFlow] Auth passed");
 
-  const apiKey = Netlify.env.get("GROQ_API_KEY");
-  if (!apiKey) {
-    return errorResponse("GROQ_API_KEY not configured", 500);
-  }
+    // Test mode: return immediately to verify POST works
+    const url = new URL(req.url);
+    if (url.searchParams.get("test") === "1") {
+      console.log("[WhisperFlow] Test mode — returning OK");
+      return new Response(JSON.stringify({ status: "ok", message: "WhisperFlow is working" }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
 
-  const dictionary = getDictionary();
+    const secret = getEnv("WHISPERFLOW_SECRET");
+    if (secret) {
+      const provided = req.headers.get("x-api-key");
+      if (provided !== secret) {
+        return errorResponse("Unauthorized", 401);
+      }
+    }
+    console.log("[WhisperFlow] Auth passed");
 
-  let formData: FormData;
-  try {
-    formData = await req.formData();
-  } catch (_e) {
-    return errorResponse("Invalid form data. Send multipart/form-data with an 'audio' field.", 400);
-  }
+    const apiKey = getEnv("GROQ_API_KEY");
+    if (!apiKey) {
+      return errorResponse("GROQ_API_KEY not configured", 500);
+    }
 
-  const audioFile = formData.get("audio");
-  if (!audioFile || !(audioFile instanceof Blob)) {
-    const keys = [...formData.keys()];
-    return errorResponse(`Missing 'audio' field in form data. Received fields: ${keys.join(", ")}`, 400);
-  }
+    const dictionary = getDictionary();
 
-  const audioSize = audioFile.size;
-  const audioType = audioFile.type;
-  console.log(`[WhisperFlow] Audio received: ${audioSize} bytes, type: ${audioType}`);
+    let formData: FormData;
+    try {
+      formData = await req.formData();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return errorResponse(`Invalid form data: ${msg}`, 400);
+    }
 
-  const mode = (formData.get("mode") as Mode) || "transcribe";
-  const tone = (formData.get("tone") as Tone) || "auto";
-  console.log(`[WhisperFlow] Mode: ${mode}, Tone: ${tone}`);
+    const audioFile = formData.get("audio");
+    if (!audioFile || !(audioFile instanceof Blob)) {
+      const keys = [...formData.keys()];
+      return errorResponse(`Missing 'audio' field in form data. Received fields: ${keys.join(", ")}`, 400);
+    }
 
-  try {
+    const audioSize = audioFile.size;
+    const audioType = audioFile.type;
+    console.log(`[WhisperFlow] Audio received: ${audioSize} bytes, type: ${audioType}`);
+
+    const mode = (formData.get("mode") as Mode) || "transcribe";
+    const tone = (formData.get("tone") as Tone) || "auto";
+    console.log(`[WhisperFlow] Mode: ${mode}, Tone: ${tone}`);
+
     let result: string;
 
     if (mode === "edit") {
