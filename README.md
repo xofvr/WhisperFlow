@@ -1,17 +1,14 @@
 # WhisperFlow
 
-Speech-to-text dictation powered by Groq Whisper + LLM auto-editing, triggered from your iPhone Action Button.
+Speech-to-text dictation powered by Groq Whisper, triggered from your iPhone Action Button.
 
 A personal, low-cost alternative to [WisprFlow](https://wisprflow.ai/) that runs as an iPhone Shortcut backed by a Netlify serverless function.
 
 ## Features
 
 - **Fast transcription** via Groq Whisper Large v3 Turbo (216x real-time speed)
-- **Auto-editing** removes filler words (um, uh, like), adds punctuation, fixes grammar
 - **British English** spelling throughout
-- **Tone matching** — casual (messaging) or professional (email) modes
 - **Custom dictionary** for your own terms, names, and acronyms
-- **Smart editing** — highlight text, speak a command (summarise, bullet-point, rewrite)
 - **Action Button** — press and hold to dictate, text lands in your clipboard
 
 ## How It Works
@@ -19,7 +16,7 @@ A personal, low-cost alternative to [WisprFlow](https://wisprflow.ai/) that runs
 ```
 iPhone Action Button → Shortcut records audio
   → POST to Netlify function
-  → Groq Whisper (transcribe) → Groq Llama 3.3 (auto-edit)
+  → Groq Whisper (transcribe)
   → Clean text returned → copied to clipboard
 ```
 
@@ -67,23 +64,17 @@ See [docs/shortcut-setup.md](docs/shortcut-setup.md) for the step-by-step guide.
 
 ```json
 {
-  "audio": "<base64-encoded audio>",
-  "tone": "auto",
-  "mode": "transcribe"
+  "audio": "<base64-encoded audio>"
 }
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `audio` | Yes | Base64-encoded audio (m4a, mp3, wav, etc.) |
-| `mode` | No | `transcribe` (default) or `edit` |
-| `tone` | No | `auto` (default), `casual`, or `professional` |
-| `text` | Edit mode | The text to edit |
-| `command` | Edit mode | `summarize`, `bullet`, `rewrite`, or `custom` |
 
 Also supports multipart/form-data and raw binary body (with params via query string).
 
-**Response:** Plain text (the transcribed/edited text).
+**Response:** Plain text (the transcribed text).
 
 ## Custom Dictionary
 
@@ -99,13 +90,12 @@ Edit `config/dictionary.json` to add your own terms:
 }
 ```
 
-- `terms`: Maps misspellings/variants to the correct form (applied after LLM processing)
+- `terms`: Maps misspellings/variants to the correct form (applied after transcription)
 - `promptHints`: Fed to Whisper's prompt parameter to bias vocabulary recognition
 
 ## Cost
 
 - **Groq Whisper**: ~$0.04/hour of audio (~$0.0006 per 30s dictation)
-- **Groq LLM** (Llama 3.3 70B): Free tier
 - **Netlify**: Free tier (125k requests/month)
 - **Effective cost**: Essentially free for personal use
 
