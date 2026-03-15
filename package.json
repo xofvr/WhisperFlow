@@ -1,0 +1,15 @@
+{
+  "name": "whisperflow",
+  "version": "1.0.0",
+  "description": "Speech-to-text dictation via Groq Whisper + LLM auto-editing, designed for iPhone Shortcuts",
+  "type": "module",
+  "scripts": {
+    "dev": "netlify dev",
+    "build": "tsc --noEmit",
+    "deploy": "netlify deploy --prod"
+  },
+  "devDependencies": {
+    "@netlify/functions": "^2.8.0",
+    "typescript": "^5.5.0"
+  }
+}

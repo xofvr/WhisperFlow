@@ -1,0 +1,9 @@
+{
+  "terms": {
+    "groq": "Groq",
+    "whisperflow": "WhisperFlow",
+    "wisprflow": "WisprFlow",
+    "netlify": "Netlify"
+  },
+  "promptHints": "Groq, WhisperFlow, WisprFlow, Netlify"
+}
