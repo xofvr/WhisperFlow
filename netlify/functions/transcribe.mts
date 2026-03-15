@@ -56,8 +56,9 @@ export default async (req: Request, _context: Context) => {
       return errorResponse("Method not allowed", 405);
     }
 
-    // Test mode: return immediately to verify POST works
     const url = new URL(req.url);
+
+    // Test mode: return immediately to verify POST works
     if (url.searchParams.get("test") === "1") {
       console.log("[WhisperFlow] Test mode — returning OK");
       return new Response(JSON.stringify({ status: "ok", message: "WhisperFlow is working" }), {
@@ -81,33 +82,62 @@ export default async (req: Request, _context: Context) => {
 
     const dictionary = getDictionary();
 
-    let formData: FormData;
-    try {
-      formData = await req.formData();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return errorResponse(`Invalid form data: ${msg}`, 400);
-    }
+    // Support two modes:
+    // 1. Raw binary body (Content-Type: audio/* or application/octet-stream)
+    //    - tone/mode/command/text via query params
+    // 2. Multipart form-data (legacy)
+    //    - tone/mode/command/text via form fields
+    const contentType = req.headers.get("content-type") || "";
+    let audioFile: Blob;
+    let mode: Mode;
+    let tone: Tone;
+    let editText: string | null = null;
+    let editCommand: EditCommand | null = null;
 
-    const audioFile = formData.get("audio");
-    if (!audioFile || !(audioFile instanceof Blob)) {
-      const keys = [...formData.keys()];
-      return errorResponse(`Missing 'audio' field in form data. Received fields: ${keys.join(", ")}`, 400);
+    if (contentType.includes("multipart/form-data")) {
+      // Legacy: multipart form-data
+      let formData: FormData;
+      try {
+        formData = await req.formData();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return errorResponse(`Invalid form data: ${msg}`, 400);
+      }
+
+      const formAudio = formData.get("audio");
+      if (!formAudio || !(formAudio instanceof Blob)) {
+        const keys = [...formData.keys()];
+        return errorResponse(`Missing 'audio' field. Received: ${keys.join(", ")}`, 400);
+      }
+      audioFile = formAudio;
+      mode = (formData.get("mode") as Mode) || "transcribe";
+      tone = (formData.get("tone") as Tone) || "auto";
+      editText = formData.get("text") as string | null;
+      editCommand = formData.get("command") as EditCommand | null;
+    } else {
+      // Raw binary body — audio sent directly
+      const body = await req.arrayBuffer();
+      if (!body || body.byteLength === 0) {
+        return errorResponse("Empty request body. Send audio as the raw POST body.", 400);
+      }
+      const mimeType = contentType || "audio/m4a";
+      audioFile = new Blob([body], { type: mimeType });
+      mode = (url.searchParams.get("mode") as Mode) || "transcribe";
+      tone = (url.searchParams.get("tone") as Tone) || "auto";
+      editText = url.searchParams.get("text");
+      editCommand = url.searchParams.get("command") as EditCommand | null;
     }
 
     const audioSize = audioFile.size;
     const audioType = audioFile.type;
     console.log(`[WhisperFlow] Audio received: ${audioSize} bytes, type: ${audioType}`);
-
-    const mode = (formData.get("mode") as Mode) || "transcribe";
-    const tone = (formData.get("tone") as Tone) || "auto";
     console.log(`[WhisperFlow] Mode: ${mode}, Tone: ${tone}`);
 
     let result: string;
 
     if (mode === "edit") {
-      const text = formData.get("text") as string;
-      const command = (formData.get("command") as EditCommand) || "custom";
+      const text = editText;
+      const command = editCommand || "custom";
       if (!text) {
         return errorResponse("Edit mode requires a 'text' field", 400);
       }
