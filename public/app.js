@@ -28,8 +28,15 @@
   // States
   var stateIdle = document.getElementById("state-idle");
   var stateProcessing = document.getElementById("state-processing");
+  var stateError = document.getElementById("state-error");
   var stateResults = document.getElementById("state-results");
   var statusText = document.getElementById("status-text");
+  var errorText = document.getElementById("error-text");
+
+  // Error state buttons
+  var retryBtn = document.getElementById("retry-btn");
+  var downloadRecordingBtn = document.getElementById("download-recording-btn");
+  var discardBtn = document.getElementById("discard-btn");
 
   // Results
   var transcriptContent = document.getElementById("transcript-content");
@@ -51,12 +58,21 @@
   var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var currentState = "idle";
 
+  // Saved recording for retry/download on failure
+  var savedRecordingBlob = null;
+
+  // ============ AUDIO CHUNKING CONSTANTS ============
+
+  var TARGET_SAMPLE_RATE = 16000; // Whisper's native rate
+  var CHUNK_DURATION_SECS = 180;  // 3 minutes per chunk
+
   // ============ STATE TRANSITIONS ============
 
   function transitionTo(state) {
     var states = {
       idle: stateIdle,
       processing: stateProcessing,
+      error: stateError,
       results: stateResults,
     };
 
@@ -348,6 +364,89 @@
     processAudio(file);
   });
 
+  // ============ WAV ENCODING ============
+
+  function encodeWAV(samples, sampleRate) {
+    var numSamples = samples.length;
+    var buffer = new ArrayBuffer(44 + numSamples * 2);
+    var view = new DataView(buffer);
+
+    function writeStr(offset, str) {
+      for (var i = 0; i < str.length; i++) {
+        view.setUint8(offset + i, str.charCodeAt(i));
+      }
+    }
+
+    writeStr(0, "RIFF");
+    view.setUint32(4, 36 + numSamples * 2, true);
+    writeStr(8, "WAVE");
+    writeStr(12, "fmt ");
+    view.setUint32(16, 16, true);           // PCM chunk size
+    view.setUint16(20, 1, true);            // PCM format
+    view.setUint16(22, 1, true);            // mono
+    view.setUint32(24, sampleRate, true);   // sample rate
+    view.setUint32(28, sampleRate * 2, true); // byte rate (16-bit mono)
+    view.setUint16(32, 2, true);            // block align
+    view.setUint16(34, 16, true);           // bits per sample
+    writeStr(36, "data");
+    view.setUint32(40, numSamples * 2, true);
+
+    // Float32 → Int16
+    for (var i = 0; i < numSamples; i++) {
+      var s = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+
+    return new Blob([buffer], { type: "audio/wav" });
+  }
+
+  // ============ AUDIO DECODING & CHUNKING ============
+
+  /**
+   * Decode any audio blob → resample to 16kHz mono → split into WAV chunks.
+   * Returns an array of Blob objects, each a valid WAV file ≤ ~5.7MB.
+   */
+  async function decodeAndChunkAudio(blob) {
+    var arrayBuffer = await blob.arrayBuffer();
+
+    // Decode using browser's built-in codec support (handles m4a, webm, mp3, wav, etc.)
+    var ctx = new (window.AudioContext || window.webkitAudioContext)();
+    var decoded;
+    try {
+      decoded = await ctx.decodeAudioData(arrayBuffer);
+    } finally {
+      ctx.close();
+    }
+
+    console.log("[Chunker] Decoded: " + decoded.duration.toFixed(1) + "s, " +
+      decoded.sampleRate + "Hz, " + decoded.numberOfChannels + "ch");
+
+    // Resample to 16kHz mono using OfflineAudioContext
+    var totalSamples = Math.ceil(decoded.duration * TARGET_SAMPLE_RATE);
+    var offlineCtx = new OfflineAudioContext(1, totalSamples, TARGET_SAMPLE_RATE);
+    var source = offlineCtx.createBufferSource();
+    source.buffer = decoded;
+    source.connect(offlineCtx.destination);
+    source.start(0);
+    var resampled = await offlineCtx.startRendering();
+
+    var pcm = resampled.getChannelData(0); // Float32Array
+    console.log("[Chunker] Resampled to " + TARGET_SAMPLE_RATE + "Hz mono: " + pcm.length + " samples");
+
+    // Split into time-based chunks
+    var samplesPerChunk = CHUNK_DURATION_SECS * TARGET_SAMPLE_RATE;
+    var chunks = [];
+    for (var offset = 0; offset < pcm.length; offset += samplesPerChunk) {
+      var end = Math.min(offset + samplesPerChunk, pcm.length);
+      var chunkSamples = pcm.subarray(offset, end);
+      chunks.push(encodeWAV(chunkSamples, TARGET_SAMPLE_RATE));
+    }
+
+    console.log("[Chunker] Created " + chunks.length + " chunk(s), " +
+      CHUNK_DURATION_SECS + "s each");
+    return chunks;
+  }
+
   // ============ PROCESS AUDIO ============
 
   async function processAudio(blob) {
@@ -359,37 +458,95 @@
       return;
     }
 
-    transitionTo("processing");
-    statusText.textContent = "Transcribing your meeting...";
+    // Save the recording so we can retry or download if something fails
+    savedRecordingBlob = blob;
 
-    var formData = new FormData();
-    formData.append("audio", blob, "meeting-audio");
+    transitionTo("processing");
+    statusText.textContent = "Preparing audio...";
 
     try {
-      var res = await fetch("/api/meeting", {
-        method: "POST",
-        headers: { "x-api-key": apiKey },
-        body: formData,
-      });
+      // Step 1: Decode and chunk the audio on the client side
+      var wavChunks = await decodeAndChunkAudio(blob);
+      var totalChunks = wavChunks.length;
 
-      if (!res.ok) {
-        var errBody;
-        try {
-          errBody = await res.json();
-        } catch (_e) {
-          errBody = { error: "Request failed with status " + res.status };
+      // Step 2: Transcribe each chunk sequentially
+      var transcripts = [];
+      for (var i = 0; i < totalChunks; i++) {
+        if (totalChunks === 1) {
+          statusText.textContent = "Transcribing your meeting...";
+        } else {
+          statusText.textContent = "Transcribing chunk " + (i + 1) + " of " + totalChunks + "...";
         }
-        throw new Error(errBody.error || "Request failed");
+
+        var formData = new FormData();
+        formData.append("audio", wavChunks[i], "chunk-" + i + ".wav");
+
+        var res = await fetch("/api/meeting?action=transcribe", {
+          method: "POST",
+          headers: { "x-api-key": apiKey },
+          body: formData,
+        });
+
+        if (!res.ok) {
+          var errBody;
+          try {
+            errBody = await res.json();
+          } catch (_e) {
+            errBody = { error: "Transcription failed with status " + res.status };
+          }
+          throw new Error(errBody.error || "Transcription failed for chunk " + (i + 1));
+        }
+
+        var chunkResult = await res.json();
+        if (chunkResult.transcript) {
+          transcripts.push(chunkResult.transcript);
+        }
       }
 
-      var data = await res.json();
+      var fullTranscript = transcripts.join(" ");
+
+      if (!fullTranscript.trim()) {
+        savedRecordingBlob = null;
+        showResults({
+          transcript: "",
+          summary: "No speech detected in the audio.",
+          actionItems: "No action items identified.",
+        });
+        return;
+      }
+
+      // Step 3: Summarize the combined transcript
+      statusText.textContent = "Generating summary and action items...";
+
+      var sumRes = await fetch("/api/meeting?action=summarize", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ transcript: fullTranscript }),
+      });
+
+      if (!sumRes.ok) {
+        var sumErr;
+        try {
+          sumErr = await sumRes.json();
+        } catch (_e) {
+          sumErr = { error: "Summarization failed with status " + sumRes.status };
+        }
+        throw new Error(sumErr.error || "Summarization failed");
+      }
+
+      var data = await sumRes.json();
+
+      // Success — release the saved recording
+      savedRecordingBlob = null;
       showResults(data);
     } catch (err) {
       console.error("Processing error:", err);
-      transitionTo("idle");
-      keyStatus.textContent = "Error: " + err.message;
-      keyStatus.style.color = "var(--danger)";
-      settingsPanel.classList.add("settings-open");
+      // Show error state with retry/download options (recording is still saved)
+      errorText.textContent = "Error: " + err.message;
+      transitionTo("error");
     }
   }
 
@@ -435,10 +592,45 @@
     });
   });
 
+  // ============ RETRY / DOWNLOAD / DISCARD ============
+
+  retryBtn.addEventListener("click", function () {
+    if (!savedRecordingBlob) return;
+    processAudio(savedRecordingBlob);
+  });
+
+  downloadRecordingBtn.addEventListener("click", function () {
+    if (!savedRecordingBlob) return;
+    var ext = "webm";
+    var type = savedRecordingBlob.type || "";
+    if (type.includes("mp4") || type.includes("m4a")) ext = "m4a";
+    else if (type.includes("wav")) ext = "wav";
+    else if (type.includes("mp3") || type.includes("mpeg")) ext = "mp3";
+
+    var url = URL.createObjectURL(savedRecordingBlob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "meeting-recording." + ext;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+
+  discardBtn.addEventListener("click", function () {
+    savedRecordingBlob = null;
+    fileNameEl.textContent = "";
+    uploadBtn.classList.add("hidden");
+    uploadBtn._file = null;
+    fileInput.value = "";
+    transitionTo("idle");
+  });
+
   // ============ NEW RECORDING ============
 
   newRecordingBtn.addEventListener("click", function () {
-    // Reset file upload state
+    // Reset file upload state and release saved recording
+    savedRecordingBlob = null;
     fileNameEl.textContent = "";
     uploadBtn.classList.add("hidden");
     uploadBtn._file = null;
