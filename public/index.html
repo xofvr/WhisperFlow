@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WhisperFlow — Meeting Recorder</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1>WhisperFlow</h1>
+    <p class="subtitle">Meeting Recorder</p>
+  </header>
+
+  <main>
+    <!-- API Key -->
+    <section id="auth">
+      <label for="api-key">API Key</label>
+      <div class="input-row">
+        <input type="password" id="api-key" placeholder="Enter your WhisperFlow API key" autocomplete="off">
+        <button id="save-key">Save</button>
+      </div>
+      <p id="key-status" class="status-text"></p>
+    </section>
+
+    <!-- Input Tabs -->
+    <section id="input">
+      <div class="tabs">
+        <button class="tab active" data-tab="record">Record</button>
+        <button class="tab" data-tab="upload">Upload</button>
+      </div>
+
+      <div class="tab-content" id="tab-record">
+        <div class="record-area">
+          <button id="record-btn" class="record-button" disabled>Start Recording</button>
+          <span id="timer" class="timer">00:00</span>
+        </div>
+      </div>
+
+      <div class="tab-content hidden" id="tab-upload">
+        <label for="file-input" class="file-label">
+          Choose an audio or video file
+          <input type="file" id="file-input" accept="audio/*,video/*">
+        </label>
+        <p id="file-name" class="status-text"></p>
+        <button id="upload-btn" class="primary-btn" disabled>Process File</button>
+      </div>
+    </section>
+
+    <!-- Processing Status -->
+    <section id="status" class="hidden">
+      <div class="spinner"></div>
+      <p id="status-text">Processing...</p>
+    </section>
+
+    <!-- Results -->
+    <section id="results" class="hidden">
+      <div class="result-panel">
+        <div class="panel-header" data-panel="transcript">
+          <h2>Transcript</h2>
+          <button class="copy-btn" data-target="transcript-content">Copy</button>
+        </div>
+        <div class="panel-body" id="transcript-content"></div>
+      </div>
+
+      <div class="result-panel">
+        <div class="panel-header" data-panel="summary">
+          <h2>Summary</h2>
+          <button class="copy-btn" data-target="summary-content">Copy</button>
+        </div>
+        <div class="panel-body" id="summary-content"></div>
+      </div>
+
+      <div class="result-panel">
+        <div class="panel-header" data-panel="actions">
+          <h2>Action Items</h2>
+          <button class="copy-btn" data-target="actions-content">Copy</button>
+        </div>
+        <div class="panel-body" id="actions-content"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
