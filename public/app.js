@@ -1,6 +1,13 @@
 (function () {
   "use strict";
 
+  // ============ CONSTANTS ============
+
+  // Netlify Functions have a ~6 MB request body limit.
+  // We chunk audio at 4.5 MB to stay safely under the limit.
+  var CHUNK_SIZE = 4.5 * 1024 * 1024; // 4.5 MB
+  var MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MB (sanity cap)
+
   // ============ DOM REFS ============
 
   // Settings
@@ -31,6 +38,11 @@
   var stateResults = document.getElementById("state-results");
   var statusText = document.getElementById("status-text");
 
+  // Progress
+  var progressContainer = document.getElementById("progress-container");
+  var progressFill = document.getElementById("progress-fill");
+  var progressText = document.getElementById("progress-text");
+
   // Results
   var transcriptContent = document.getElementById("transcript-content");
   var summaryContent = document.getElementById("summary-content");
@@ -51,6 +63,20 @@
   var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var currentState = "idle";
 
+  // ============ PROGRESS HELPERS ============
+
+  function showProgress(percent, text) {
+    progressContainer.classList.remove("hidden");
+    progressFill.style.width = percent + "%";
+    if (text) progressText.textContent = text;
+  }
+
+  function hideProgress() {
+    progressContainer.classList.add("hidden");
+    progressFill.style.width = "0%";
+    progressText.textContent = "";
+  }
+
   // ============ STATE TRANSITIONS ============
 
   function transitionTo(state) {
@@ -65,6 +91,8 @@
     var outgoing = states[currentState];
     var incoming = states[state];
     currentState = state;
+
+    if (state !== "processing") hideProgress();
 
     if (reducedMotion || typeof gsap === "undefined") {
       // Fallback: simple class toggle
@@ -272,6 +300,10 @@
 
       var mimeType = pickMimeType();
       var options = mimeType ? { mimeType: mimeType } : {};
+
+      // Use a low bitrate for speech — keeps file size small for long recordings
+      options.audioBitsPerSecond = 32000;
+
       mediaRecorder = new MediaRecorder(stream, options);
       audioChunks = [];
 
@@ -335,7 +367,15 @@
   });
 
   function handleFile(file) {
+    if (file.size > MAX_FILE_SIZE) {
+      fileNameEl.textContent = file.name + " — too large (max 500 MB)";
+      fileNameEl.style.color = "var(--danger)";
+      uploadBtn.classList.add("hidden");
+      return;
+    }
+
     fileNameEl.textContent = file.name + " (" + (file.size / (1024 * 1024)).toFixed(1) + " MB)";
+    fileNameEl.style.color = "";
     uploadBtn.classList.remove("hidden");
     uploadBtn.disabled = false;
     // Store file reference for upload
@@ -347,6 +387,74 @@
     if (!file) return;
     processAudio(file);
   });
+
+  // ============ CHUNKED TRANSCRIPTION ============
+
+  /**
+   * Split a Blob into byte-range chunks of at most `size` bytes.
+   */
+  function splitBlob(blob, size) {
+    var chunks = [];
+    var offset = 0;
+    while (offset < blob.size) {
+      chunks.push(blob.slice(offset, Math.min(offset + size, blob.size)));
+      offset += size;
+    }
+    return chunks;
+  }
+
+  /**
+   * Send a single audio chunk to /api/transcribe and return the transcript text.
+   */
+  async function transcribeChunk(chunk, apiKey) {
+    var formData = new FormData();
+    formData.append("audio", chunk, "chunk.webm");
+    formData.append("mode", "transcribe");
+
+    var res = await fetch("/api/transcribe", {
+      method: "POST",
+      headers: { "x-api-key": apiKey },
+      body: formData,
+    });
+
+    if (!res.ok) {
+      var errBody;
+      try {
+        errBody = await res.json();
+      } catch (_e) {
+        errBody = { error: "Transcription failed with status " + res.status };
+      }
+      throw new Error(errBody.error || "Transcription failed");
+    }
+
+    return (await res.text()).trim();
+  }
+
+  /**
+   * Send the combined transcript to /api/meeting-summarize and return the full result.
+   */
+  async function summarizeTranscript(transcript, apiKey) {
+    var res = await fetch("/api/meeting-summarize", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ transcript: transcript }),
+    });
+
+    if (!res.ok) {
+      var errBody;
+      try {
+        errBody = await res.json();
+      } catch (_e) {
+        errBody = { error: "Summarization failed with status " + res.status };
+      }
+      throw new Error(errBody.error || "Summarization failed");
+    }
+
+    return res.json();
+  }
 
   // ============ PROCESS AUDIO ============
 
@@ -360,29 +468,47 @@
     }
 
     transitionTo("processing");
-    statusText.textContent = "Transcribing your meeting...";
-
-    var formData = new FormData();
-    formData.append("audio", blob, "meeting-audio");
 
     try {
-      var res = await fetch("/api/meeting", {
-        method: "POST",
-        headers: { "x-api-key": apiKey },
-        body: formData,
-      });
+      var chunks = splitBlob(blob, CHUNK_SIZE);
+      var totalChunks = chunks.length;
+      var transcripts = [];
 
-      if (!res.ok) {
-        var errBody;
-        try {
-          errBody = await res.json();
-        } catch (_e) {
-          errBody = { error: "Request failed with status " + res.status };
+      // Step 1: Transcribe each chunk
+      for (var i = 0; i < totalChunks; i++) {
+        var chunkNum = i + 1;
+        if (totalChunks === 1) {
+          statusText.textContent = "Transcribing your meeting...";
+          hideProgress();
+        } else {
+          statusText.textContent = "Transcribing chunk " + chunkNum + " of " + totalChunks + "...";
+          var percent = Math.round((i / (totalChunks + 1)) * 100);
+          showProgress(percent, chunkNum + " / " + totalChunks + " chunks");
         }
-        throw new Error(errBody.error || "Request failed");
+
+        var text = await transcribeChunk(chunks[i], apiKey);
+        if (text) transcripts.push(text);
       }
 
-      var data = await res.json();
+      var fullTranscript = transcripts.join(" ");
+
+      if (!fullTranscript.trim()) {
+        showResults({
+          transcript: "",
+          summary: "No speech detected in the audio.",
+          actionItems: "No action items identified.",
+        });
+        return;
+      }
+
+      // Step 2: Summarize
+      statusText.textContent = "Generating summary and action items...";
+      if (totalChunks > 1) {
+        showProgress(90, "Summarising...");
+      }
+
+      var data = await summarizeTranscript(fullTranscript, apiKey);
+      showProgress(100, "Done");
       showResults(data);
     } catch (err) {
       console.error("Processing error:", err);
