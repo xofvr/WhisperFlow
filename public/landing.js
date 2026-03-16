@@ -46,45 +46,52 @@
     },
   });
 
-  // --- Generic reveal elements: fade up on scroll (once only) ---
+  // --- Reveal elements: animate once when entering viewport ---
+  // Elements stay visible by default. onEnter fires once, does a
+  // quick gsap.from() that briefly hides then animates in.
   gsap.utils.toArray(".reveal").forEach(function (el) {
-    gsap.fromTo(el,
-      { y: 40, opacity: 0 },
-      {
-        y: 0,
-        opacity: 1,
-        duration: 0.8,
-        ease: "power2.out",
-        scrollTrigger: {
-          trigger: el,
-          start: "top 85%",
-          toggleActions: "play none none none",
-        },
-      }
-    );
+    ScrollTrigger.create({
+      trigger: el,
+      start: "top 85%",
+      once: true,
+      onEnter: function () {
+        gsap.from(el, {
+          y: 40,
+          opacity: 0,
+          duration: 0.8,
+          ease: "power2.out",
+        });
+      },
+    });
   });
 
   // --- Step cards: staggered entrance (once only) ---
   ScrollTrigger.batch(".step-card", {
     once: true,
-    onEnter: function (batch) {
-      gsap.fromTo(batch,
-        { y: 50, opacity: 0 },
-        { y: 0, opacity: 1, duration: 0.8, ease: "power2.out", stagger: 0.15 }
-      );
-    },
     start: "top 85%",
+    onEnter: function (batch) {
+      gsap.from(batch, {
+        y: 50,
+        opacity: 0,
+        duration: 0.8,
+        ease: "power2.out",
+        stagger: 0.15,
+      });
+    },
   });
 
   // --- Feature cards: staggered entrance (once only) ---
   ScrollTrigger.batch(".feature-card", {
     once: true,
-    onEnter: function (batch) {
-      gsap.fromTo(batch,
-        { y: 50, opacity: 0 },
-        { y: 0, opacity: 1, duration: 0.8, ease: "power2.out", stagger: 0.12 }
-      );
-    },
     start: "top 85%",
+    onEnter: function (batch) {
+      gsap.from(batch, {
+        y: 50,
+        opacity: 0,
+        duration: 0.8,
+        ease: "power2.out",
+        stagger: 0.12,
+      });
+    },
   });
 })();
