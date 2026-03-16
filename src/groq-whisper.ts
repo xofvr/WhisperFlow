@@ -13,10 +13,26 @@ export async function transcribeAudio(
 ): Promise<string> {
   const { language = "en", promptHints } = options;
 
-  console.log(`[Whisper] Starting transcription: ${audioBlob.size} bytes, lang=${language}, model=${MODEL}`);
+  console.log(`[Whisper] Starting transcription: ${audioBlob.size} bytes, type=${audioBlob.type}, lang=${language}, model=${MODEL}`);
+
+  // Derive filename extension from mime type so Groq doesn't misdetect the format
+  const extMap: Record<string, string> = {
+    "audio/wav": "wav",
+    "audio/wave": "wav",
+    "audio/x-wav": "wav",
+    "audio/mp4": "m4a",
+    "audio/m4a": "m4a",
+    "audio/x-m4a": "m4a",
+    "audio/mpeg": "mp3",
+    "audio/webm": "webm",
+    "audio/ogg": "ogg",
+    "audio/flac": "flac",
+  };
+  const ext = extMap[audioBlob.type] || "m4a";
+  const filename = `audio.${ext}`;
 
   const form = new FormData();
-  form.append("file", audioBlob, "audio.m4a");
+  form.append("file", audioBlob, filename);
   form.append("model", MODEL);
   form.append("language", language);
   form.append("response_format", "json");
