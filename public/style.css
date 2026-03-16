@@ -229,10 +229,51 @@ input:focus {
   display: none !important;
 }
 
-.reveal {
-  opacity: 0;
-  transform: translateY(40px);
+/* ============ Landing Animations ============ */
+
+/* Hero entrance: CSS keyframes, no JS dependency.
+   Elements start hidden and animate in with staggered delays. */
+@keyframes hero-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
+
+.hero .label,
+.hero .heading-hero,
+.hero .body-large,
+.hero .hero-buttons {
+  opacity: 0;
+  animation: hero-fade-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.hero .label          { animation-delay: 0.1s; }
+.hero .heading-hero   { animation-delay: 0.25s; }
+.hero .body-large     { animation-delay: 0.45s; }
+.hero .hero-buttons   { animation-delay: 0.6s; }
+
+/* Scroll reveal: elements start hidden, get .visible class
+   from IntersectionObserver, then transition in. */
+.scroll-reveal {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.scroll-reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Stagger cards within a group using transition-delay */
+.scroll-reveal:nth-child(2) { transition-delay: 0.1s; }
+.scroll-reveal:nth-child(3) { transition-delay: 0.2s; }
 
 /* ============================================
    LANDING PAGE
@@ -815,9 +856,13 @@ input:focus {
     scroll-behavior: auto !important;
   }
 
-  .reveal {
-    opacity: 1;
-    transform: none;
+  .hero .label,
+  .hero .heading-hero,
+  .hero .body-large,
+  .hero .hero-buttons,
+  .scroll-reveal {
+    opacity: 1 !important;
+    transform: none !important;
   }
 }
 
@@ -844,5 +889,6 @@ input:focus {
     flex-direction: column;
     gap: var(--space-sm);
     text-align: center;
+    padding-bottom: var(--space-2xl);
   }
 }
