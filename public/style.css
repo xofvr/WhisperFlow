@@ -309,6 +309,11 @@ input:focus {
 
 .hero .heading-hero .word {
   display: inline-block;
+  margin-right: 0.2em;
+}
+
+.hero .heading-hero .word:last-child {
+  margin-right: 0;
 }
 
 .hero .body-large {
