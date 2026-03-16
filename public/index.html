@@ -3,84 +3,112 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WhisperFlow — Meeting Recorder</title>
+  <title>WhisperFlow — Your meetings, distilled</title>
+  <meta name="description" content="Record, transcribe, and summarise your meetings with AI — in seconds.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <header>
-    <h1>WhisperFlow</h1>
-    <p class="subtitle">Meeting Recorder</p>
-  </header>
 
-  <main>
-    <!-- API Key -->
-    <section id="auth">
-      <label for="api-key">API Key</label>
-      <div class="input-row">
-        <input type="password" id="api-key" placeholder="Enter your WhisperFlow API key" autocomplete="off">
-        <button id="save-key">Save</button>
+  <!-- Nav -->
+  <nav class="landing-nav">
+    <span class="nav-logo">WhisperFlow</span>
+    <a href="/app.html" class="btn btn-ghost">Open App</a>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-gradient"></div>
+    <p class="label">Meeting Intelligence</p>
+    <h1 class="heading-hero">
+      <span class="word">Your </span><span class="word">meetings, </span><span class="word">distilled</span>
+    </h1>
+    <p class="body-large">Record, transcribe, and summarise any meeting with AI — in seconds.</p>
+    <div class="hero-buttons">
+      <a href="/app.html" class="btn btn-primary">Get Started</a>
+      <a href="#how-it-works" class="btn btn-ghost">Learn More</a>
+    </div>
+  </section>
+
+  <!-- How It Works -->
+  <section class="section" id="how-it-works">
+    <div class="section-header">
+      <h2 class="heading-section reveal">How it works</h2>
+    </div>
+    <div class="steps-grid">
+      <div class="step-card glass-panel">
+        <div class="step-number">1</div>
+        <h3>Record or Upload</h3>
+        <p>Record directly from your microphone or upload an existing audio or video file from any source.</p>
       </div>
-      <p id="key-status" class="status-text"></p>
-    </section>
-
-    <!-- Input Tabs -->
-    <section id="input">
-      <div class="tabs">
-        <button class="tab active" data-tab="record">Record</button>
-        <button class="tab" data-tab="upload">Upload</button>
+      <div class="step-card glass-panel">
+        <div class="step-number">2</div>
+        <h3>AI Transcription</h3>
+        <p>Groq Whisper transcribes your audio at 216x real-time speed with high accuracy, cleaning up filler words automatically.</p>
       </div>
-
-      <div class="tab-content" id="tab-record">
-        <div class="record-area">
-          <button id="record-btn" class="record-button" disabled>Start Recording</button>
-          <span id="timer" class="timer">00:00</span>
-        </div>
+      <div class="step-card glass-panel">
+        <div class="step-number">3</div>
+        <h3>Summary &amp; Actions</h3>
+        <p>Get an intelligent summary with key decisions highlighted and all action items extracted with owners and deadlines.</p>
       </div>
+    </div>
+  </section>
 
-      <div class="tab-content hidden" id="tab-upload">
-        <label for="file-input" class="file-label">
-          Choose an audio or video file
-          <input type="file" id="file-input" accept="audio/*,video/*">
-        </label>
-        <p id="file-name" class="status-text"></p>
-        <button id="upload-btn" class="primary-btn" disabled>Process File</button>
+  <!-- Features -->
+  <section class="section">
+    <div class="section-header">
+      <h2 class="heading-section reveal">Built for clarity</h2>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card glass-panel">
+        <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+        <h3>Accurate Transcription</h3>
+        <p>Powered by Whisper Large v3 Turbo, delivering fast and accurate speech-to-text with automatic filler word removal and British English throughout.</p>
       </div>
-    </section>
-
-    <!-- Processing Status -->
-    <section id="status" class="hidden">
-      <div class="spinner"></div>
-      <p id="status-text">Processing...</p>
-    </section>
-
-    <!-- Results -->
-    <section id="results" class="hidden">
-      <div class="result-panel">
-        <div class="panel-header" data-panel="transcript">
-          <h2>Transcript</h2>
-          <button class="copy-btn" data-target="transcript-content">Copy</button>
-        </div>
-        <div class="panel-body" id="transcript-content"></div>
+      <div class="feature-card glass-panel">
+        <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="16" y1="13" x2="8" y2="13"/>
+          <line x1="16" y1="17" x2="8" y2="17"/>
+          <polyline points="10 9 9 9 8 9"/>
+        </svg>
+        <h3>Intelligent Summaries</h3>
+        <p>AI-generated meeting summaries that capture key decisions, highlight open questions, and organise topics into clear, logical sections.</p>
       </div>
-
-      <div class="result-panel">
-        <div class="panel-header" data-panel="summary">
-          <h2>Summary</h2>
-          <button class="copy-btn" data-target="summary-content">Copy</button>
-        </div>
-        <div class="panel-body" id="summary-content"></div>
+      <div class="feature-card glass-panel">
+        <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+          <polyline points="22 4 12 14.01 9 11.01"/>
+        </svg>
+        <h3>Action Items</h3>
+        <p>Every task, commitment, and follow-up is automatically extracted with who is responsible, what needs doing, and any deadlines mentioned.</p>
       </div>
+    </div>
+  </section>
 
-      <div class="result-panel">
-        <div class="panel-header" data-panel="actions">
-          <h2>Action Items</h2>
-          <button class="copy-btn" data-target="actions-content">Copy</button>
-        </div>
-        <div class="panel-body" id="actions-content"></div>
-      </div>
-    </section>
-  </main>
+  <!-- CTA -->
+  <section class="cta-section">
+    <h2 class="heading-section reveal">Ready to try it?</h2>
+    <p class="body-large reveal">No sign-up required. Just bring your API key and start recording.</p>
+    <a href="/app.html" class="btn btn-primary reveal">Start Recording</a>
+  </section>
 
-  <script src="/app.js"></script>
+  <!-- Footer -->
+  <footer class="landing-footer">
+    <span class="nav-logo">WhisperFlow</span>
+    <span>&copy; 2026</span>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+  <script src="/landing.js"></script>
 </body>
 </html>
