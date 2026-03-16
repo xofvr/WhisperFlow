@@ -7,11 +7,6 @@ import { MEETING_SUMMARY_PROMPT, MEETING_ACTION_ITEMS_PROMPT } from "../../src/p
 import type { GroqChatMessage, MeetingResponse } from "../../src/types.js";
 
 const CHUNK_SIZE = 24 * 1024 * 1024; // 24MB
-// Netlify Functions have a ~6 MB request body limit.
-// If audio exceeds this, clients should use the chunked flow:
-//   1. POST each chunk to /api/transcribe
-//   2. POST combined transcript to /api/meeting-summarize
-const MAX_BODY_SIZE = 5.5 * 1024 * 1024; // 5.5 MB warning threshold
 
 function getDictionary() {
   return loadDictionary({
@@ -133,15 +128,6 @@ export default async (req: Request, _context: Context) => {
     }
 
     console.log(`[Meeting] Audio received: ${audioFile.size} bytes, type: ${audioFile.type}`);
-
-    if (audioFile.size > MAX_BODY_SIZE) {
-      return errorResponse(
-        "Audio file too large for a single request (" +
-          Math.round(audioFile.size / (1024 * 1024)) +
-          " MB). Use the chunked upload flow: send each chunk to /api/transcribe, then POST the combined transcript to /api/meeting-summarize.",
-        413,
-      );
-    }
 
     // Transcribe — with chunking safety net for large files
     let rawTranscript: string;
