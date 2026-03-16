@@ -46,45 +46,44 @@
     },
   });
 
-  // --- Generic reveal elements: fade up on scroll ---
+  // --- Generic reveal elements: fade up on scroll (once only) ---
   gsap.utils.toArray(".reveal").forEach(function (el) {
-    gsap.from(el, {
-      y: 40,
-      opacity: 0,
-      duration: 0.8,
-      ease: "power2.out",
-      scrollTrigger: {
-        trigger: el,
-        start: "top 85%",
-        toggleActions: "play none none none",
-      },
-    });
-  });
-
-  // --- Step cards: staggered entrance ---
-  ScrollTrigger.batch(".step-card", {
-    onEnter: function (batch) {
-      gsap.from(batch, {
-        y: 50,
-        opacity: 0,
+    gsap.fromTo(el,
+      { y: 40, opacity: 0 },
+      {
+        y: 0,
+        opacity: 1,
         duration: 0.8,
         ease: "power2.out",
-        stagger: 0.15,
-      });
+        scrollTrigger: {
+          trigger: el,
+          start: "top 85%",
+          toggleActions: "play none none none",
+        },
+      }
+    );
+  });
+
+  // --- Step cards: staggered entrance (once only) ---
+  ScrollTrigger.batch(".step-card", {
+    once: true,
+    onEnter: function (batch) {
+      gsap.fromTo(batch,
+        { y: 50, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.8, ease: "power2.out", stagger: 0.15 }
+      );
     },
     start: "top 85%",
   });
 
-  // --- Feature cards: staggered entrance ---
+  // --- Feature cards: staggered entrance (once only) ---
   ScrollTrigger.batch(".feature-card", {
+    once: true,
     onEnter: function (batch) {
-      gsap.from(batch, {
-        y: 50,
-        opacity: 0,
-        duration: 0.8,
-        ease: "power2.out",
-        stagger: 0.12,
-      });
+      gsap.fromTo(batch,
+        { y: 50, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.8, ease: "power2.out", stagger: 0.12 }
+      );
     },
     start: "top 85%",
   });

@@ -230,8 +230,8 @@ input:focus {
 }
 
 .reveal {
-  opacity: 0;
-  transform: translateY(40px);
+  /* Initial state set by GSAP — no CSS hiding so elements
+     remain visible if JS fails to load */
 }
 
 /* ============================================
@@ -844,5 +844,6 @@ input:focus {
     flex-direction: column;
     gap: var(--space-sm);
     text-align: center;
+    padding-bottom: var(--space-2xl);
   }
 }
