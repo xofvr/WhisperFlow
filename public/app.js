@@ -28,8 +28,15 @@
   // States
   var stateIdle = document.getElementById("state-idle");
   var stateProcessing = document.getElementById("state-processing");
+  var stateError = document.getElementById("state-error");
   var stateResults = document.getElementById("state-results");
   var statusText = document.getElementById("status-text");
+  var errorText = document.getElementById("error-text");
+
+  // Error state buttons
+  var retryBtn = document.getElementById("retry-btn");
+  var downloadRecordingBtn = document.getElementById("download-recording-btn");
+  var discardBtn = document.getElementById("discard-btn");
 
   // Results
   var transcriptContent = document.getElementById("transcript-content");
@@ -51,6 +58,9 @@
   var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var currentState = "idle";
 
+  // Saved recording for retry/download on failure
+  var savedRecordingBlob = null;
+
   // ============ AUDIO CHUNKING CONSTANTS ============
 
   var TARGET_SAMPLE_RATE = 16000; // Whisper's native rate
@@ -62,6 +72,7 @@
     var states = {
       idle: stateIdle,
       processing: stateProcessing,
+      error: stateError,
       results: stateResults,
     };
 
@@ -447,6 +458,9 @@
       return;
     }
 
+    // Save the recording so we can retry or download if something fails
+    savedRecordingBlob = blob;
+
     transitionTo("processing");
     statusText.textContent = "Preparing audio...";
 
@@ -492,6 +506,7 @@
       var fullTranscript = transcripts.join(" ");
 
       if (!fullTranscript.trim()) {
+        savedRecordingBlob = null;
         showResults({
           transcript: "",
           summary: "No speech detected in the audio.",
@@ -523,13 +538,15 @@
       }
 
       var data = await sumRes.json();
+
+      // Success — release the saved recording
+      savedRecordingBlob = null;
       showResults(data);
     } catch (err) {
       console.error("Processing error:", err);
-      transitionTo("idle");
-      keyStatus.textContent = "Error: " + err.message;
-      keyStatus.style.color = "var(--danger)";
-      settingsPanel.classList.add("settings-open");
+      // Show error state with retry/download options (recording is still saved)
+      errorText.textContent = "Error: " + err.message;
+      transitionTo("error");
     }
   }
 
@@ -575,10 +592,45 @@
     });
   });
 
+  // ============ RETRY / DOWNLOAD / DISCARD ============
+
+  retryBtn.addEventListener("click", function () {
+    if (!savedRecordingBlob) return;
+    processAudio(savedRecordingBlob);
+  });
+
+  downloadRecordingBtn.addEventListener("click", function () {
+    if (!savedRecordingBlob) return;
+    var ext = "webm";
+    var type = savedRecordingBlob.type || "";
+    if (type.includes("mp4") || type.includes("m4a")) ext = "m4a";
+    else if (type.includes("wav")) ext = "wav";
+    else if (type.includes("mp3") || type.includes("mpeg")) ext = "mp3";
+
+    var url = URL.createObjectURL(savedRecordingBlob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "meeting-recording." + ext;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+
+  discardBtn.addEventListener("click", function () {
+    savedRecordingBlob = null;
+    fileNameEl.textContent = "";
+    uploadBtn.classList.add("hidden");
+    uploadBtn._file = null;
+    fileInput.value = "";
+    transitionTo("idle");
+  });
+
   // ============ NEW RECORDING ============
 
   newRecordingBtn.addEventListener("click", function () {
-    // Reset file upload state
+    // Reset file upload state and release saved recording
+    savedRecordingBlob = null;
     fileNameEl.textContent = "";
     uploadBtn.classList.add("hidden");
     uploadBtn._file = null;

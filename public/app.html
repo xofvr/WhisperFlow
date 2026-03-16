@@ -97,6 +97,19 @@
       </div>
     </div>
 
+    <!-- State: Error (recording saved, can retry or download) -->
+    <div id="state-error" class="hidden">
+      <div class="processing-container">
+        <p id="error-text" class="body-small" style="color: var(--danger); margin-bottom: var(--space-md); text-align: center;"></p>
+        <p class="body-small" style="color: var(--text-tertiary); margin-bottom: var(--space-lg); text-align: center;">Your recording has been saved temporarily. You can retry or download it.</p>
+        <div style="display: flex; gap: var(--space-sm); justify-content: center; flex-wrap: wrap;">
+          <button id="retry-btn" class="btn btn-primary">Retry Transcription</button>
+          <button id="download-recording-btn" class="btn btn-ghost">Download Recording</button>
+          <button id="discard-btn" class="btn btn-ghost">Discard</button>
+        </div>
+      </div>
+    </div>
+
     <!-- State: Results -->
     <div id="state-results" class="hidden">
       <div class="results-header">
