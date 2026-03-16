@@ -48,8 +48,65 @@
   var animationFrameId = null;
 
   var STORAGE_KEY = "whisperflow-api-key";
+  var DB_NAME = "whisperflow-backup";
+  var DB_STORE = "recordings";
   var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var currentState = "idle";
+
+  // ============ INDEXEDDB AUDIO BACKUP ============
+
+  function openBackupDB() {
+    return new Promise(function (resolve, reject) {
+      var req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = function () {
+        var db = req.result;
+        if (!db.objectStoreNames.contains(DB_STORE)) {
+          db.createObjectStore(DB_STORE, { keyPath: "id", autoIncrement: true });
+        }
+      };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+
+  function saveBackup(blob) {
+    return openBackupDB().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(DB_STORE, "readwrite");
+        var store = tx.objectStore(DB_STORE);
+        var record = { audio: blob, timestamp: Date.now(), mimeType: blob.type };
+        var req = store.add(record);
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
+
+  function deleteBackup(id) {
+    return openBackupDB().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(DB_STORE, "readwrite");
+        var req = tx.objectStore(DB_STORE).delete(id);
+        req.onsuccess = function () { resolve(); };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
+
+  function getLatestBackup() {
+    return openBackupDB().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(DB_STORE, "readonly");
+        var store = tx.objectStore(DB_STORE);
+        var req = store.openCursor(null, "prev");
+        req.onsuccess = function () {
+          var cursor = req.result;
+          resolve(cursor ? cursor.value : null);
+        };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
 
   // ============ STATE TRANSITIONS ============
 
@@ -350,7 +407,7 @@
 
   // ============ PROCESS AUDIO ============
 
-  async function processAudio(blob) {
+  async function processAudio(blob, backupId) {
     var apiKey = localStorage.getItem(STORAGE_KEY);
     if (!apiKey) {
       keyStatus.textContent = "Please save your API key first";
@@ -360,6 +417,17 @@
     }
 
     transitionTo("processing");
+    statusText.textContent = "Saving local backup...";
+
+    // Save a local backup before uploading (skip if retrying an existing backup)
+    if (!backupId) {
+      try {
+        backupId = await saveBackup(blob);
+      } catch (e) {
+        console.warn("Could not save local backup:", e);
+      }
+    }
+
     statusText.textContent = "Transcribing your meeting...";
 
     var formData = new FormData();
@@ -383,13 +451,22 @@
       }
 
       var data = await res.json();
+
+      // Upload succeeded — delete the backup
+      if (backupId) {
+        deleteBackup(backupId).catch(function (e) {
+          console.warn("Could not delete backup:", e);
+        });
+      }
+
       showResults(data);
     } catch (err) {
       console.error("Processing error:", err);
       transitionTo("idle");
-      keyStatus.textContent = "Error: " + err.message;
+      keyStatus.textContent = "Error: " + err.message + ". Your recording is saved locally — click Retry to try again.";
       keyStatus.style.color = "var(--danger)";
       settingsPanel.classList.add("settings-open");
+      showRetryBanner();
     }
   }
 
@@ -447,7 +524,93 @@
     transitionTo("idle");
   });
 
+  // ============ RECOVERY BANNER ============
+
+  function showRetryBanner() {
+    // Avoid duplicates
+    if (document.getElementById("retry-banner")) return;
+
+    var banner = document.createElement("div");
+    banner.id = "retry-banner";
+    banner.style.cssText = "position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);" +
+      "background:var(--glass-bg, rgba(30,30,50,0.85));backdrop-filter:blur(12px);" +
+      "border:1px solid var(--danger, #e55);border-radius:12px;padding:0.75rem 1.25rem;" +
+      "display:flex;align-items:center;gap:0.75rem;z-index:1000;color:var(--text, #fff);" +
+      "font-size:0.9rem;box-shadow:0 4px 24px rgba(0,0,0,0.3);";
+
+    banner.innerHTML =
+      '<span>Recording saved locally.</span>' +
+      '<button id="retry-upload-btn" style="background:var(--accent, #7c6aef);color:#fff;' +
+      'border:none;border-radius:8px;padding:0.5rem 1rem;cursor:pointer;font-weight:600;">Retry Upload</button>' +
+      '<button id="download-backup-btn" style="background:transparent;color:var(--accent, #7c6aef);' +
+      'border:1px solid var(--accent, #7c6aef);border-radius:8px;padding:0.5rem 1rem;cursor:pointer;' +
+      'font-weight:600;">Download</button>' +
+      '<button id="dismiss-banner-btn" style="background:transparent;border:none;color:var(--muted, #888);' +
+      'cursor:pointer;font-size:1.2rem;padding:0 0.25rem;" aria-label="Dismiss">&times;</button>';
+
+    document.body.appendChild(banner);
+
+    document.getElementById("retry-upload-btn").addEventListener("click", function () {
+      banner.remove();
+      retryFromBackup();
+    });
+
+    document.getElementById("download-backup-btn").addEventListener("click", function () {
+      downloadBackup();
+    });
+
+    document.getElementById("dismiss-banner-btn").addEventListener("click", function () {
+      banner.remove();
+    });
+  }
+
+  function retryFromBackup() {
+    getLatestBackup().then(function (record) {
+      if (!record) {
+        keyStatus.textContent = "No saved recording found.";
+        keyStatus.style.color = "var(--danger)";
+        return;
+      }
+      var blob = record.audio instanceof Blob
+        ? record.audio
+        : new Blob([record.audio], { type: record.mimeType });
+      processAudio(blob, record.id);
+    }).catch(function (err) {
+      console.error("Recovery failed:", err);
+      keyStatus.textContent = "Could not recover recording.";
+      keyStatus.style.color = "var(--danger)";
+    });
+  }
+
+  function downloadBackup() {
+    getLatestBackup().then(function (record) {
+      if (!record) return;
+      var blob = record.audio instanceof Blob
+        ? record.audio
+        : new Blob([record.audio], { type: record.mimeType });
+      var ext = (record.mimeType || "").indexOf("mp4") !== -1 ? ".mp4" : ".webm";
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = "meeting-backup-" + new Date(record.timestamp).toISOString().slice(0, 16) + ext;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  // Check for unsent recordings on startup
+  function checkForBackups() {
+    getLatestBackup().then(function (record) {
+      if (record) {
+        showRetryBanner();
+      }
+    }).catch(function () {
+      // IndexedDB unavailable — nothing to recover
+    });
+  }
+
   // ============ INIT ============
 
   loadApiKey();
+  checkForBackups();
 })();
