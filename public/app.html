@@ -25,9 +25,10 @@
   <!-- Settings Panel (slide-down) -->
   <div class="settings-panel" id="settings-panel">
     <div class="settings-inner">
-      <label class="label" for="api-key">API Key</label>
+      <label class="label" for="api-key">WhisperFlow Secret</label>
+      <p class="body-small" style="margin-bottom: var(--space-sm); color: var(--text-tertiary);">The WHISPERFLOW_SECRET you set in Netlify env vars (not your Groq key).</p>
       <div class="input-row">
-        <input type="password" id="api-key" placeholder="Enter your WhisperFlow API key" autocomplete="off">
+        <input type="password" id="api-key" placeholder="Enter your WHISPERFLOW_SECRET" autocomplete="off">
         <button id="save-key" class="btn btn-primary">Save</button>
       </div>
       <p id="key-status" class="body-small"></p>
