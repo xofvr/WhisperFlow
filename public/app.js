@@ -64,7 +64,7 @@
   // ============ AUDIO CHUNKING CONSTANTS ============
 
   var TARGET_SAMPLE_RATE = 16000; // Whisper's native rate
-  var CHUNK_DURATION_SECS = 180;  // 3 minutes per chunk
+  var CHUNK_DURATION_SECS = 120;  // 2 minutes per chunk (~3.7MB WAV, under Netlify's 6MB limit)
 
   // ============ STATE TRANSITIONS ============
 
