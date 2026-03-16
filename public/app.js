@@ -1,6 +1,10 @@
 (function () {
   "use strict";
 
+  // ============ CONSTANTS ============
+
+  var MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MB (sanity cap)
+
   // ============ DOM REFS ============
 
   // Settings
@@ -31,6 +35,11 @@
   var stateResults = document.getElementById("state-results");
   var statusText = document.getElementById("status-text");
 
+  // Progress
+  var progressContainer = document.getElementById("progress-container");
+  var progressFill = document.getElementById("progress-fill");
+  var progressText = document.getElementById("progress-text");
+
   // Results
   var transcriptContent = document.getElementById("transcript-content");
   var summaryContent = document.getElementById("summary-content");
@@ -51,6 +60,20 @@
   var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var currentState = "idle";
 
+  // ============ PROGRESS HELPERS ============
+
+  function showProgress(percent, text) {
+    progressContainer.classList.remove("hidden");
+    progressFill.style.width = percent + "%";
+    if (text) progressText.textContent = text;
+  }
+
+  function hideProgress() {
+    progressContainer.classList.add("hidden");
+    progressFill.style.width = "0%";
+    progressText.textContent = "";
+  }
+
   // ============ STATE TRANSITIONS ============
 
   function transitionTo(state) {
@@ -65,6 +88,8 @@
     var outgoing = states[currentState];
     var incoming = states[state];
     currentState = state;
+
+    if (state !== "processing") hideProgress();
 
     if (reducedMotion || typeof gsap === "undefined") {
       // Fallback: simple class toggle
@@ -272,6 +297,10 @@
 
       var mimeType = pickMimeType();
       var options = mimeType ? { mimeType: mimeType } : {};
+
+      // Use a low bitrate for speech — keeps file size small for long recordings
+      options.audioBitsPerSecond = 32000;
+
       mediaRecorder = new MediaRecorder(stream, options);
       audioChunks = [];
 
@@ -335,7 +364,15 @@
   });
 
   function handleFile(file) {
+    if (file.size > MAX_FILE_SIZE) {
+      fileNameEl.textContent = file.name + " — too large (max 500 MB)";
+      fileNameEl.style.color = "var(--danger)";
+      uploadBtn.classList.add("hidden");
+      return;
+    }
+
     fileNameEl.textContent = file.name + " (" + (file.size / (1024 * 1024)).toFixed(1) + " MB)";
+    fileNameEl.style.color = "";
     uploadBtn.classList.remove("hidden");
     uploadBtn.disabled = false;
     // Store file reference for upload
@@ -347,6 +384,154 @@
     if (!file) return;
     processAudio(file);
   });
+
+  // ============ AUDIO CHUNKING (lossless PCM split) ============
+
+  // Target sample rate for WAV chunks sent to the API.
+  // 16 kHz mono 16-bit ≈ 1.92 MB/min → ~2.3 min per 4.5 MB chunk.
+  var TARGET_SAMPLE_RATE = 16000;
+
+  // Max WAV chunk payload in bytes (must stay under Netlify's ~6 MB limit).
+  var MAX_WAV_BYTES = 4.5 * 1024 * 1024;
+
+  // Samples that fit in one chunk: (maxBytes - 44 byte header) / 2 bytes per sample
+  var SAMPLES_PER_CHUNK = Math.floor((MAX_WAV_BYTES - 44) / 2);
+
+  /**
+   * Decode any audio/video Blob to mono PCM Float32Array at TARGET_SAMPLE_RATE.
+   * Uses OfflineAudioContext to guarantee correct decoding of every codec
+   * the browser supports (WebM/Opus, MP4/AAC, WAV, MP3, etc.).
+   */
+  async function decodeToPCM(blob) {
+    var arrayBuffer = await blob.arrayBuffer();
+
+    // First decode at the file's native sample rate
+    var tempCtx = new (window.AudioContext || window.webkitAudioContext)();
+    var decoded = await tempCtx.decodeAudioData(arrayBuffer);
+    tempCtx.close();
+
+    // Resample to TARGET_SAMPLE_RATE and mix down to mono
+    var duration = decoded.duration;
+    var outLength = Math.ceil(duration * TARGET_SAMPLE_RATE);
+    var offline = new OfflineAudioContext(1, outLength, TARGET_SAMPLE_RATE);
+    var source = offline.createBufferSource();
+    source.buffer = decoded;
+    source.connect(offline.destination);
+    source.start(0);
+    var rendered = await offline.startRendering();
+
+    return rendered.getChannelData(0); // Float32Array, mono
+  }
+
+  /**
+   * Write a WAV header + int16 samples into an ArrayBuffer and return a Blob.
+   */
+  function encodeWav(samples, sampleRate) {
+    var numSamples = samples.length;
+    var buffer = new ArrayBuffer(44 + numSamples * 2);
+    var view = new DataView(buffer);
+
+    function writeStr(offset, str) {
+      for (var i = 0; i < str.length; i++) {
+        view.setUint8(offset + i, str.charCodeAt(i));
+      }
+    }
+
+    writeStr(0, "RIFF");
+    view.setUint32(4, 36 + numSamples * 2, true);
+    writeStr(8, "WAVE");
+    writeStr(12, "fmt ");
+    view.setUint32(16, 16, true);        // PCM sub-chunk size
+    view.setUint16(20, 1, true);         // PCM format
+    view.setUint16(22, 1, true);         // mono
+    view.setUint32(24, sampleRate, true); // sample rate
+    view.setUint32(28, sampleRate * 2, true); // byte rate
+    view.setUint16(32, 2, true);         // block align
+    view.setUint16(34, 16, true);        // bits per sample
+    writeStr(36, "data");
+    view.setUint32(40, numSamples * 2, true);
+
+    var offset = 44;
+    for (var i = 0; i < numSamples; i++) {
+      var s = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      offset += 2;
+    }
+
+    return new Blob([buffer], { type: "audio/wav" });
+  }
+
+  /**
+   * Split decoded PCM into WAV Blobs that each fit under the Netlify limit.
+   * Splits at exact sample boundaries — zero data loss.
+   */
+  function splitIntoWavChunks(pcmSamples) {
+    var chunks = [];
+    var total = pcmSamples.length;
+    var offset = 0;
+
+    while (offset < total) {
+      var end = Math.min(offset + SAMPLES_PER_CHUNK, total);
+      var slice = pcmSamples.subarray(offset, end);
+      chunks.push(encodeWav(slice, TARGET_SAMPLE_RATE));
+      offset = end;
+    }
+
+    return chunks;
+  }
+
+  /**
+   * Send a single WAV chunk to /api/transcribe and return the transcript text.
+   */
+  async function transcribeChunk(wavBlob, apiKey) {
+    var formData = new FormData();
+    formData.append("audio", wavBlob, "chunk.wav");
+    formData.append("mode", "transcribe");
+
+    var res = await fetch("/api/transcribe", {
+      method: "POST",
+      headers: { "x-api-key": apiKey },
+      body: formData,
+    });
+
+    if (!res.ok) {
+      var errBody;
+      try {
+        errBody = await res.json();
+      } catch (_e) {
+        errBody = { error: "Transcription failed with status " + res.status };
+      }
+      throw new Error(errBody.error || "Transcription failed");
+    }
+
+    return (await res.text()).trim();
+  }
+
+  /**
+   * Send the combined transcript to /api/meeting-summarize for summary + action items.
+   */
+  async function summarizeTranscript(transcript, apiKey) {
+    var res = await fetch("/api/meeting-summarize", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ transcript: transcript }),
+    });
+
+    if (!res.ok) {
+      var errBody;
+      try {
+        errBody = await res.json();
+      } catch (_e) {
+        errBody = { error: "Summarization failed with status " + res.status };
+      }
+      throw new Error(errBody.error || "Summarization failed");
+    }
+
+    return res.json();
+  }
 
   // ============ PROCESS AUDIO ============
 
@@ -360,29 +545,56 @@
     }
 
     transitionTo("processing");
-    statusText.textContent = "Transcribing your meeting...";
-
-    var formData = new FormData();
-    formData.append("audio", blob, "meeting-audio");
+    statusText.textContent = "Decoding audio...";
 
     try {
-      var res = await fetch("/api/meeting", {
-        method: "POST",
-        headers: { "x-api-key": apiKey },
-        body: formData,
-      });
+      // Step 1: Decode to raw PCM — works for any format the browser supports
+      var pcmSamples = await decodeToPCM(blob);
+      var durationSec = pcmSamples.length / TARGET_SAMPLE_RATE;
+      var durationMin = Math.round(durationSec / 60);
+      console.log("[WhisperFlow] Decoded " + pcmSamples.length + " samples (" + durationMin + " min)");
 
-      if (!res.ok) {
-        var errBody;
-        try {
-          errBody = await res.json();
-        } catch (_e) {
-          errBody = { error: "Request failed with status " + res.status };
+      // Step 2: Split into WAV chunks at exact sample boundaries (no data lost)
+      var wavChunks = splitIntoWavChunks(pcmSamples);
+      var totalChunks = wavChunks.length;
+      console.log("[WhisperFlow] Split into " + totalChunks + " WAV chunks");
+
+      // Step 3: Transcribe each chunk sequentially
+      var transcripts = [];
+      for (var i = 0; i < totalChunks; i++) {
+        var chunkNum = i + 1;
+        if (totalChunks === 1) {
+          statusText.textContent = "Transcribing your meeting...";
+          hideProgress();
+        } else {
+          statusText.textContent = "Transcribing part " + chunkNum + " of " + totalChunks + "...";
+          var percent = Math.round((i / (totalChunks + 1)) * 100);
+          showProgress(percent, "Part " + chunkNum + " / " + totalChunks);
         }
-        throw new Error(errBody.error || "Request failed");
+
+        var text = await transcribeChunk(wavChunks[i], apiKey);
+        if (text) transcripts.push(text);
       }
 
-      var data = await res.json();
+      var fullTranscript = transcripts.join(" ");
+
+      if (!fullTranscript.trim()) {
+        showResults({
+          transcript: "",
+          summary: "No speech detected in the audio.",
+          actionItems: "No action items identified.",
+        });
+        return;
+      }
+
+      // Step 4: Send full transcript for summary + action items
+      statusText.textContent = "Generating summary and action items...";
+      if (totalChunks > 1) {
+        showProgress(90, "Summarising...");
+      }
+
+      var data = await summarizeTranscript(fullTranscript, apiKey);
+      showProgress(100, "Done");
       showResults(data);
     } catch (err) {
       console.error("Processing error:", err);
