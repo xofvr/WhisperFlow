@@ -35,3 +35,9 @@ export interface GroqChatResponse {
     };
   }>;
 }
+
+export interface MeetingResponse {
+  transcript: string;
+  summary: string;
+  actionItems: string;
+}

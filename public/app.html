@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WhisperFlow — App</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+  <!-- App Header -->
+  <header class="app-header glass-panel">
+    <a href="/" class="app-logo">WhisperFlow</a>
+    <button id="settings-toggle" class="settings-btn" aria-label="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
+  </header>
+
+  <!-- Settings Panel (slide-down) -->
+  <div class="settings-panel" id="settings-panel">
+    <div class="settings-inner">
+      <label class="label" for="api-key">API Key</label>
+      <div class="input-row">
+        <input type="password" id="api-key" placeholder="Enter your WhisperFlow API key" autocomplete="off">
+        <button id="save-key" class="btn btn-primary">Save</button>
+      </div>
+      <p id="key-status" class="body-small"></p>
+    </div>
+  </div>
+
+  <main class="app-container">
+
+    <!-- State: Idle -->
+    <div id="state-idle">
+      <h1 class="heading-section" style="text-align: center; margin-bottom: var(--space-xl);">
+        Record a meeting
+      </h1>
+
+      <!-- Segmented Control -->
+      <div class="input-mode-toggle">
+        <button class="mode-btn active" data-mode="record">Record</button>
+        <button class="mode-btn" data-mode="upload">Upload</button>
+        <div class="mode-indicator"></div>
+      </div>
+
+      <!-- Record Panel -->
+      <div id="panel-record" class="input-panel">
+        <div class="record-button-container">
+          <button id="record-btn" class="record-button" disabled aria-label="Start recording">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="23"/>
+              <line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+          </button>
+          <span id="timer" class="timer">00:00</span>
+        </div>
+        <canvas id="waveform" class="waveform-canvas"></canvas>
+      </div>
+
+      <!-- Upload Panel -->
+      <div id="panel-upload" class="input-panel hidden">
+        <div class="dropzone" id="dropzone">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <p>Drop audio or video file here</p>
+          <p class="body-small">or click to browse</p>
+          <input type="file" id="file-input" accept="audio/*,video/*">
+        </div>
+        <div class="file-info">
+          <p id="file-name" class="body-small"></p>
+          <button id="upload-btn" class="btn btn-primary hidden" style="width: 100%; margin-top: var(--space-md);">
+            Process File
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- State: Processing -->
+    <div id="state-processing" class="hidden">
+      <div class="processing-container">
+        <div class="processing-waveform">
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <p id="status-text" class="shimmer-text">Transcribing your meeting...</p>
+      </div>
+    </div>
+
+    <!-- State: Results -->
+    <div id="state-results" class="hidden">
+      <div class="results-header">
+        <h2 class="heading-section">Results</h2>
+        <button id="new-recording" class="btn btn-ghost">New Recording</button>
+      </div>
+
+      <div class="result-card glass-panel">
+        <div class="result-card-header">
+          <h3>Transcript</h3>
+          <button class="btn btn-ghost copy-btn" data-target="transcript-content">Copy</button>
+        </div>
+        <div class="result-card-body" id="transcript-content"></div>
+      </div>
+
+      <div class="result-card glass-panel">
+        <div class="result-card-header">
+          <h3>Summary</h3>
+          <button class="btn btn-ghost copy-btn" data-target="summary-content">Copy</button>
+        </div>
+        <div class="result-card-body" id="summary-content"></div>
+      </div>
+
+      <div class="result-card glass-panel">
+        <div class="result-card-header">
+          <h3>Action Items</h3>
+          <button class="btn btn-ghost copy-btn" data-target="actions-content">Copy</button>
+        </div>
+        <div class="result-card-body" id="actions-content"></div>
+      </div>
+    </div>
+
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
