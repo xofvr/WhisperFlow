@@ -3,9 +3,6 @@
 
   // ============ CONSTANTS ============
 
-  // Netlify Functions have a ~6 MB request body limit.
-  // We chunk audio at 4.5 MB to stay safely under the limit.
-  var CHUNK_SIZE = 4.5 * 1024 * 1024; // 4.5 MB
   var MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MB (sanity cap)
 
   // ============ DOM REFS ============
@@ -388,27 +385,107 @@
     processAudio(file);
   });
 
-  // ============ CHUNKED TRANSCRIPTION ============
+  // ============ AUDIO CHUNKING (lossless PCM split) ============
+
+  // Target sample rate for WAV chunks sent to the API.
+  // 16 kHz mono 16-bit ≈ 1.92 MB/min → ~2.3 min per 4.5 MB chunk.
+  var TARGET_SAMPLE_RATE = 16000;
+
+  // Max WAV chunk payload in bytes (must stay under Netlify's ~6 MB limit).
+  var MAX_WAV_BYTES = 4.5 * 1024 * 1024;
+
+  // Samples that fit in one chunk: (maxBytes - 44 byte header) / 2 bytes per sample
+  var SAMPLES_PER_CHUNK = Math.floor((MAX_WAV_BYTES - 44) / 2);
 
   /**
-   * Split a Blob into byte-range chunks of at most `size` bytes.
+   * Decode any audio/video Blob to mono PCM Float32Array at TARGET_SAMPLE_RATE.
+   * Uses OfflineAudioContext to guarantee correct decoding of every codec
+   * the browser supports (WebM/Opus, MP4/AAC, WAV, MP3, etc.).
    */
-  function splitBlob(blob, size) {
-    var chunks = [];
-    var offset = 0;
-    while (offset < blob.size) {
-      chunks.push(blob.slice(offset, Math.min(offset + size, blob.size)));
-      offset += size;
+  async function decodeToPCM(blob) {
+    var arrayBuffer = await blob.arrayBuffer();
+
+    // First decode at the file's native sample rate
+    var tempCtx = new (window.AudioContext || window.webkitAudioContext)();
+    var decoded = await tempCtx.decodeAudioData(arrayBuffer);
+    tempCtx.close();
+
+    // Resample to TARGET_SAMPLE_RATE and mix down to mono
+    var duration = decoded.duration;
+    var outLength = Math.ceil(duration * TARGET_SAMPLE_RATE);
+    var offline = new OfflineAudioContext(1, outLength, TARGET_SAMPLE_RATE);
+    var source = offline.createBufferSource();
+    source.buffer = decoded;
+    source.connect(offline.destination);
+    source.start(0);
+    var rendered = await offline.startRendering();
+
+    return rendered.getChannelData(0); // Float32Array, mono
+  }
+
+  /**
+   * Write a WAV header + int16 samples into an ArrayBuffer and return a Blob.
+   */
+  function encodeWav(samples, sampleRate) {
+    var numSamples = samples.length;
+    var buffer = new ArrayBuffer(44 + numSamples * 2);
+    var view = new DataView(buffer);
+
+    function writeStr(offset, str) {
+      for (var i = 0; i < str.length; i++) {
+        view.setUint8(offset + i, str.charCodeAt(i));
+      }
     }
+
+    writeStr(0, "RIFF");
+    view.setUint32(4, 36 + numSamples * 2, true);
+    writeStr(8, "WAVE");
+    writeStr(12, "fmt ");
+    view.setUint32(16, 16, true);        // PCM sub-chunk size
+    view.setUint16(20, 1, true);         // PCM format
+    view.setUint16(22, 1, true);         // mono
+    view.setUint32(24, sampleRate, true); // sample rate
+    view.setUint32(28, sampleRate * 2, true); // byte rate
+    view.setUint16(32, 2, true);         // block align
+    view.setUint16(34, 16, true);        // bits per sample
+    writeStr(36, "data");
+    view.setUint32(40, numSamples * 2, true);
+
+    var offset = 44;
+    for (var i = 0; i < numSamples; i++) {
+      var s = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      offset += 2;
+    }
+
+    return new Blob([buffer], { type: "audio/wav" });
+  }
+
+  /**
+   * Split decoded PCM into WAV Blobs that each fit under the Netlify limit.
+   * Splits at exact sample boundaries — zero data loss.
+   */
+  function splitIntoWavChunks(pcmSamples) {
+    var chunks = [];
+    var total = pcmSamples.length;
+    var offset = 0;
+
+    while (offset < total) {
+      var end = Math.min(offset + SAMPLES_PER_CHUNK, total);
+      var slice = pcmSamples.subarray(offset, end);
+      chunks.push(encodeWav(slice, TARGET_SAMPLE_RATE));
+      offset = end;
+    }
+
     return chunks;
   }
 
   /**
-   * Send a single audio chunk to /api/transcribe and return the transcript text.
+   * Send a single WAV chunk to /api/transcribe and return the transcript text.
    */
-  async function transcribeChunk(chunk, apiKey) {
+  async function transcribeChunk(wavBlob, apiKey) {
     var formData = new FormData();
-    formData.append("audio", chunk, "chunk.webm");
+    formData.append("audio", wavBlob, "chunk.wav");
     formData.append("mode", "transcribe");
 
     var res = await fetch("/api/transcribe", {
@@ -431,7 +508,7 @@
   }
 
   /**
-   * Send the combined transcript to /api/meeting-summarize and return the full result.
+   * Send the combined transcript to /api/meeting-summarize for summary + action items.
    */
   async function summarizeTranscript(transcript, apiKey) {
     var res = await fetch("/api/meeting-summarize", {
@@ -468,25 +545,34 @@
     }
 
     transitionTo("processing");
+    statusText.textContent = "Decoding audio...";
 
     try {
-      var chunks = splitBlob(blob, CHUNK_SIZE);
-      var totalChunks = chunks.length;
-      var transcripts = [];
+      // Step 1: Decode to raw PCM — works for any format the browser supports
+      var pcmSamples = await decodeToPCM(blob);
+      var durationSec = pcmSamples.length / TARGET_SAMPLE_RATE;
+      var durationMin = Math.round(durationSec / 60);
+      console.log("[WhisperFlow] Decoded " + pcmSamples.length + " samples (" + durationMin + " min)");
 
-      // Step 1: Transcribe each chunk
+      // Step 2: Split into WAV chunks at exact sample boundaries (no data lost)
+      var wavChunks = splitIntoWavChunks(pcmSamples);
+      var totalChunks = wavChunks.length;
+      console.log("[WhisperFlow] Split into " + totalChunks + " WAV chunks");
+
+      // Step 3: Transcribe each chunk sequentially
+      var transcripts = [];
       for (var i = 0; i < totalChunks; i++) {
         var chunkNum = i + 1;
         if (totalChunks === 1) {
           statusText.textContent = "Transcribing your meeting...";
           hideProgress();
         } else {
-          statusText.textContent = "Transcribing chunk " + chunkNum + " of " + totalChunks + "...";
+          statusText.textContent = "Transcribing part " + chunkNum + " of " + totalChunks + "...";
           var percent = Math.round((i / (totalChunks + 1)) * 100);
-          showProgress(percent, chunkNum + " / " + totalChunks + " chunks");
+          showProgress(percent, "Part " + chunkNum + " / " + totalChunks);
         }
 
-        var text = await transcribeChunk(chunks[i], apiKey);
+        var text = await transcribeChunk(wavChunks[i], apiKey);
         if (text) transcripts.push(text);
       }
 
@@ -501,7 +587,7 @@
         return;
       }
 
-      // Step 2: Summarize
+      // Step 4: Send full transcript for summary + action items
       statusText.textContent = "Generating summary and action items...";
       if (totalChunks > 1) {
         showProgress(90, "Summarising...");
