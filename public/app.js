@@ -407,6 +407,8 @@
 
   // ============ PROCESS AUDIO ============
 
+  var CHUNK_LIMIT = 4.5 * 1024 * 1024; // 4.5MB — safely under Netlify's ~6MB gateway limit
+
   async function processAudio(blob, backupId) {
     var apiKey = localStorage.getItem(STORAGE_KEY);
     if (!apiKey) {
@@ -428,29 +430,37 @@
       }
     }
 
-    statusText.textContent = "Transcribing your meeting...";
-
-    var formData = new FormData();
-    formData.append("audio", blob, "meeting-audio");
-
     try {
-      var res = await fetch("/api/meeting", {
-        method: "POST",
-        headers: { "x-api-key": apiKey },
-        body: formData,
-      });
+      var data;
 
-      if (!res.ok) {
-        var errBody;
-        try {
-          errBody = await res.json();
-        } catch (_e) {
-          errBody = { error: "Request failed with status " + res.status };
+      if (blob.size <= CHUNK_LIMIT) {
+        // Small file — use the original single-request endpoint
+        statusText.textContent = "Transcribing your meeting...";
+
+        var formData = new FormData();
+        formData.append("audio", blob, "meeting-audio");
+
+        var res = await fetch("/api/meeting", {
+          method: "POST",
+          headers: { "x-api-key": apiKey },
+          body: formData,
+        });
+
+        if (!res.ok) {
+          var errBody;
+          try {
+            errBody = await res.json();
+          } catch (_e) {
+            errBody = { error: "Request failed with status " + res.status };
+          }
+          throw new Error(errBody.error || "Request failed");
         }
-        throw new Error(errBody.error || "Request failed");
-      }
 
-      var data = await res.json();
+        data = await res.json();
+      } else {
+        // Large file — chunked upload
+        data = await processAudioChunked(blob, apiKey);
+      }
 
       // Upload succeeded — delete the backup
       if (backupId) {
@@ -468,6 +478,79 @@
       settingsPanel.classList.add("settings-open");
       showRetryBanner();
     }
+  }
+
+  async function processAudioChunked(blob, apiKey) {
+    // Split blob into chunks
+    var chunks = [];
+    for (var offset = 0; offset < blob.size; offset += CHUNK_LIMIT) {
+      var end = Math.min(offset + CHUNK_LIMIT, blob.size);
+      chunks.push(blob.slice(offset, end, blob.type));
+    }
+
+    // Transcribe each chunk
+    var transcripts = [];
+    for (var i = 0; i < chunks.length; i++) {
+      statusText.textContent = "Transcribing chunk " + (i + 1) + " of " + chunks.length + "...";
+
+      var form = new FormData();
+      form.append("audio", chunks[i], "meeting-audio-chunk");
+
+      var res = await fetch("/api/meeting-transcribe", {
+        method: "POST",
+        headers: { "x-api-key": apiKey },
+        body: form,
+      });
+
+      if (!res.ok) {
+        var errBody;
+        try {
+          errBody = await res.json();
+        } catch (_e) {
+          errBody = { error: "Chunk " + (i + 1) + " failed with status " + res.status };
+        }
+        throw new Error(errBody.error || "Transcription failed");
+      }
+
+      var chunkData = await res.json();
+      if (chunkData.transcript) {
+        transcripts.push(chunkData.transcript);
+      }
+    }
+
+    var fullTranscript = transcripts.join(" ");
+
+    if (!fullTranscript.trim()) {
+      return {
+        transcript: "",
+        summary: "No speech detected in the audio.",
+        actionItems: "No action items identified.",
+      };
+    }
+
+    // Summarize the combined transcript
+    statusText.textContent = "Generating summary and action items...";
+
+    var sumRes = await fetch("/api/meeting-summarize", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ transcript: fullTranscript }),
+    });
+
+    if (!sumRes.ok) {
+      var sumErr;
+      try {
+        sumErr = await sumRes.json();
+      } catch (_e) {
+        sumErr = { error: "Summarization failed with status " + sumRes.status };
+      }
+      throw new Error(sumErr.error || "Summarization failed");
+    }
+
+    return await sumRes.json();
   }
 
   // ============ RESULTS ============
