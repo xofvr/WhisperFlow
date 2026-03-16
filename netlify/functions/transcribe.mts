@@ -19,7 +19,6 @@ function getDictionary() {
 }
 
 function errorResponse(message: string, status: number): Response {
-  console.error(`[WhisperFlow] Error ${status}: ${message}`);
   return new Response(JSON.stringify({ error: message }), {
     status,
     headers: { "Content-Type": "application/json" },
@@ -36,45 +35,25 @@ function getEnv(key: string): string | undefined {
 
 export default async (req: Request, _context: Context) => {
   try {
-    console.log(`[WhisperFlow] ${req.method} ${req.url}`);
-
-    if (req.method !== "POST") {
-      return errorResponse("Method not allowed", 405);
-    }
+    if (req.method !== "POST") return errorResponse("Method not allowed", 405);
 
     const url = new URL(req.url);
 
-    // Test mode: return immediately to verify POST works
     if (url.searchParams.get("test") === "1") {
-      console.log("[WhisperFlow] Test mode — returning OK");
       return new Response(JSON.stringify({ status: "ok", message: "WhisperFlow is working" }), {
         headers: { "Content-Type": "application/json" },
       });
     }
 
     const secret = getEnv("WHISPERFLOW_SECRET");
-    if (secret) {
-      const provided = req.headers.get("x-api-key");
-      if (provided !== secret) {
-        return errorResponse("Unauthorized", 401);
-      }
+    if (secret && req.headers.get("x-api-key") !== secret) {
+      return errorResponse("Unauthorized", 401);
     }
-    console.log("[WhisperFlow] Auth passed");
 
     const apiKey = getEnv("GROQ_API_KEY");
-    if (!apiKey) {
-      return errorResponse("GROQ_API_KEY not configured", 500);
-    }
+    if (!apiKey) return errorResponse("GROQ_API_KEY not configured", 500);
 
     const dictionary = getDictionary();
-
-    // Support three input modes:
-    // 1. JSON with base64 audio (preferred for Apple Shortcuts)
-    //    - { "audio": "base64string", "tone": "auto", "mode": "transcribe" }
-    // 2. Raw binary body (Content-Type: audio/*)
-    //    - tone/mode via query params
-    // 3. Multipart form-data (legacy)
-    //    - tone/mode via form fields
     const contentType = req.headers.get("content-type") || "";
     let audioFile: Blob;
     let mode: Mode;
@@ -83,46 +62,27 @@ export default async (req: Request, _context: Context) => {
     let editCommand: EditCommand | null = null;
 
     if (contentType.includes("application/json")) {
-      // JSON with base64-encoded audio
       let json: Record<string, string>;
-      try {
-        json = await req.json();
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return errorResponse(`Invalid JSON: ${msg}`, 400);
+      try { json = await req.json(); } catch (e) {
+        return errorResponse(`Invalid JSON: ${e instanceof Error ? e.message : e}`, 400);
       }
-
-      if (!json.audio) {
-        return errorResponse("Missing 'audio' field in JSON body", 400);
-      }
-
-      // Strip whitespace/newlines that Apple Shortcuts adds to base64
-      const cleanBase64 = json.audio.replace(/\s/g, "");
-      console.log(`[WhisperFlow] Base64 audio received: ${cleanBase64.length} chars`);
-      const binaryString = atob(cleanBase64);
+      if (!json.audio) return errorResponse("Missing 'audio' field in JSON body", 400);
+      const binaryString = atob(json.audio.replace(/\s/g, ""));
       const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
+      for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
       audioFile = new Blob([bytes], { type: "audio/m4a" });
       mode = (json.mode as Mode) || (url.searchParams.get("mode") as Mode) || "transcribe";
       tone = (json.tone as Tone) || (url.searchParams.get("tone") as Tone) || "auto";
       editText = json.text || null;
       editCommand = (json.command as EditCommand) || null;
     } else if (contentType.includes("multipart/form-data")) {
-      // Legacy: multipart form-data
       let formData: FormData;
-      try {
-        formData = await req.formData();
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return errorResponse(`Invalid form data: ${msg}`, 400);
+      try { formData = await req.formData(); } catch (e) {
+        return errorResponse(`Invalid form data: ${e instanceof Error ? e.message : e}`, 400);
       }
-
       const formAudio = formData.get("audio");
       if (!formAudio || !(formAudio instanceof Blob)) {
-        const keys = [...formData.keys()];
-        return errorResponse(`Missing 'audio' field. Received: ${keys.join(", ")}`, 400);
+        return errorResponse(`Missing 'audio' field. Received: ${[...formData.keys()].join(", ")}`, 400);
       }
       audioFile = formAudio;
       mode = (formData.get("mode") as Mode) || "transcribe";
@@ -130,87 +90,48 @@ export default async (req: Request, _context: Context) => {
       editText = formData.get("text") as string | null;
       editCommand = formData.get("command") as EditCommand | null;
     } else {
-      // Raw binary body — audio sent directly
       const body = await req.arrayBuffer();
       if (!body || body.byteLength === 0) {
         return errorResponse("Empty request body. Send audio as the raw POST body.", 400);
       }
-      const mimeType = contentType || "audio/m4a";
-      audioFile = new Blob([body], { type: mimeType });
+      audioFile = new Blob([body], { type: contentType || "audio/m4a" });
       mode = (url.searchParams.get("mode") as Mode) || "transcribe";
       tone = (url.searchParams.get("tone") as Tone) || "auto";
       editText = url.searchParams.get("text");
       editCommand = url.searchParams.get("command") as EditCommand | null;
     }
 
-    const audioSize = audioFile.size;
-    const audioType = audioFile.type;
-    console.log(`[WhisperFlow] Audio received: ${audioSize} bytes, type: ${audioType}`);
-    console.log(`[WhisperFlow] Mode: ${mode}, Tone: ${tone}`);
-
     let result: string;
 
     if (mode === "edit") {
-      const text = editText;
+      if (!editText) return errorResponse("Edit mode requires a 'text' field", 400);
       const command = editCommand || "custom";
-      if (!text) {
-        return errorResponse("Edit mode requires a 'text' field", 400);
-      }
-
-      console.log(`[WhisperFlow] Edit mode: command=${command}, text length=${text.length}`);
-
-      console.log("[WhisperFlow] Transcribing voice instruction...");
-      const voiceInstruction = await transcribeAudio(audioFile, apiKey, {
-        language: "en",
-      });
-      console.log(`[WhisperFlow] Voice instruction: "${voiceInstruction}"`);
-
+      const voiceInstruction = await transcribeAudio(audioFile, apiKey, { language: "en" });
       const systemPrompt = COMMAND_PROMPTS[command] || COMMAND_PROMPTS.custom;
-      let userContent: string;
-      if (command === "custom") {
-        userContent = `Instruction: ${voiceInstruction}\n\nText to edit:\n${text}`;
-      } else {
-        userContent = text;
-      }
-
+      const userContent = command === "custom"
+        ? `Instruction: ${voiceInstruction}\n\nText to edit:\n${editText}`
+        : editText;
       const messages: GroqChatMessage[] = [
         { role: "system", content: systemPrompt },
         { role: "user", content: userContent },
       ];
-
-      console.log("[WhisperFlow] Sending to LLM for editing...");
-      result = await processWithLLM(messages, apiKey);
-      result = applyDictionary(result, dictionary);
+      result = applyDictionary(await processWithLLM(messages, apiKey), dictionary);
     } else {
-      console.log("[WhisperFlow] Transcribing audio with Whisper...");
       const rawTranscript = await transcribeAudio(audioFile, apiKey, {
         language: "en",
         promptHints: dictionary.promptHints,
       });
-      console.log(`[WhisperFlow] Raw transcript (${rawTranscript.length} chars): "${rawTranscript.substring(0, 200)}"`);
-
       if (!rawTranscript.trim()) {
-        console.log("[WhisperFlow] Empty transcript, returning empty response");
-        return new Response("", {
-          headers: { "Content-Type": "text/plain; charset=utf-8" },
-        });
+        return new Response("", { headers: { "Content-Type": "text/plain; charset=utf-8" } });
       }
-
-      console.log("[WhisperFlow] Cleaning up fillers and applying dictionary...");
-      result = removeFillers(rawTranscript);
-      result = applyDictionary(result, dictionary);
-      console.log(`[WhisperFlow] Final result (${result.length} chars): "${result.substring(0, 200)}"`);
+      result = applyDictionary(removeFillers(rawTranscript), dictionary);
     }
 
-    console.log("[WhisperFlow] Success, returning response");
     return new Response(result, {
       headers: { "Content-Type": "text/plain; charset=utf-8" },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    const stack = err instanceof Error ? err.stack : "";
-    console.error(`[WhisperFlow] FATAL: ${message}`);
-    console.error(`[WhisperFlow] Stack: ${stack}`);
     return errorResponse(message, 502);
   }
 };
