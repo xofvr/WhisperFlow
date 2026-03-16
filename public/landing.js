@@ -1,97 +1,31 @@
 (function () {
   "use strict";
 
-  // Respect reduced motion preferences
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-
-  gsap.registerPlugin(ScrollTrigger);
-
-  // --- Hero: split text reveal ---
-  gsap.from(".hero .word", {
-    y: 60,
-    opacity: 0,
-    duration: 1,
-    ease: "power3.out",
-    stagger: 0.08,
-    delay: 0.3,
-  });
-
-  // --- Hero: subtitle + buttons fade in ---
-  gsap.from(".hero .body-large, .hero .btn", {
-    y: 30,
-    opacity: 0,
-    duration: 0.8,
-    ease: "power2.out",
-    stagger: 0.12,
-    delay: 0.9,
-  });
-
-  // --- Hero: label fade in ---
-  gsap.from(".hero .label", {
-    opacity: 0,
-    duration: 0.6,
-    ease: "power2.out",
-    delay: 0.1,
-  });
-
-  // --- Hero: gradient parallax on scroll ---
-  gsap.to(".hero-gradient", {
-    yPercent: 30,
-    ease: "none",
-    scrollTrigger: {
-      trigger: ".hero",
-      start: "top top",
-      end: "bottom top",
-      scrub: true,
-    },
-  });
-
-  // --- Reveal elements: animate once when entering viewport ---
-  // Elements stay visible by default. onEnter fires once, does a
-  // quick gsap.from() that briefly hides then animates in.
-  gsap.utils.toArray(".reveal").forEach(function (el) {
-    ScrollTrigger.create({
-      trigger: el,
-      start: "top 85%",
-      once: true,
-      onEnter: function () {
-        gsap.from(el, {
-          y: 40,
-          opacity: 0,
-          duration: 0.8,
-          ease: "power2.out",
-        });
-      },
+  // Respect reduced motion — skip all scroll reveals
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    // Make all elements visible immediately
+    document.querySelectorAll(".scroll-reveal").forEach(function (el) {
+      el.classList.add("visible");
     });
-  });
+    return;
+  }
 
-  // --- Step cards: staggered entrance (once only) ---
-  ScrollTrigger.batch(".step-card", {
-    once: true,
-    start: "top 85%",
-    onEnter: function (batch) {
-      gsap.from(batch, {
-        y: 50,
-        opacity: 0,
-        duration: 0.8,
-        ease: "power2.out",
-        stagger: 0.15,
+  // --- Scroll reveal via IntersectionObserver ---
+  // Elements with .scroll-reveal start hidden (CSS), get .visible when
+  // they enter the viewport, and stay visible permanently.
+  var observer = new IntersectionObserver(
+    function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("visible");
+          observer.unobserve(entry.target);
+        }
       });
     },
-  });
+    { threshold: 0.1, rootMargin: "0px 0px -60px 0px" }
+  );
 
-  // --- Feature cards: staggered entrance (once only) ---
-  ScrollTrigger.batch(".feature-card", {
-    once: true,
-    start: "top 85%",
-    onEnter: function (batch) {
-      gsap.from(batch, {
-        y: 50,
-        opacity: 0,
-        duration: 0.8,
-        ease: "power2.out",
-        stagger: 0.12,
-      });
-    },
+  document.querySelectorAll(".scroll-reveal").forEach(function (el) {
+    observer.observe(el);
   });
 })();
