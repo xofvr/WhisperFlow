@@ -527,17 +527,21 @@
         body: JSON.stringify({ transcript: fullTranscript }),
       });
 
-      if (!sumRes.ok) {
+      // The transcript is the valuable part: if summarising fails, still show it.
+      var data;
+      if (sumRes.ok) {
+        data = await sumRes.json();
+      } else {
         var sumErr;
         try {
           sumErr = await sumRes.json();
         } catch (_e) {
-          sumErr = { error: "Summarization failed with status " + sumRes.status };
+          sumErr = { error: "status " + sumRes.status };
         }
-        throw new Error(sumErr.error || "Summarization failed");
+        console.error("Summarization failed:", sumErr.error);
+        var unavailable = "Summary unavailable (" + (sumErr.error || "unknown error") + ")";
+        data = { transcript: fullTranscript, summary: unavailable, actionItems: unavailable };
       }
-
-      var data = await sumRes.json();
 
       // Success — release the saved recording
       savedRecordingBlob = null;
