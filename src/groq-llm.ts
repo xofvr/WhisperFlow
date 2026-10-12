@@ -1,7 +1,8 @@
 import type { GroqChatMessage, GroqChatResponse } from "./types.js";
 
 const CHAT_URL = "https://api.groq.com/openai/v1/chat/completions";
-const MODEL = "llama-3.3-70b-versatile";
+// llama-3.3-70b-versatile was shut down on Groq free/dev tier (16 Aug 2026).
+const MODEL = "openai/gpt-oss-120b";
 
 export async function processWithLLM(
   messages: GroqChatMessage[],
@@ -20,7 +21,11 @@ export async function processWithLLM(
       model: MODEL,
       messages,
       temperature: 0.3,
-      max_tokens: 4096,
+      // gpt-oss is a reasoning model: keep reasoning short and out of the reply,
+      // and leave headroom since reasoning tokens share the completion budget.
+      reasoning_effort: "low",
+      include_reasoning: false,
+      max_completion_tokens: 8192,
     }),
   });
 
