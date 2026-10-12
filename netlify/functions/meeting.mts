@@ -17,8 +17,15 @@ function getDictionary() {
       whisperflow: "WhisperFlow",
       wisprflow: "WisprFlow",
       netlify: "Netlify",
+      deskloop: "DeskLoop",
+      "desk loop": "DeskLoop",
+      bullhorn: "Bullhorn",
+      supabase: "Supabase",
     },
-    promptHints: "Groq, WhisperFlow, WisprFlow, Netlify",
+    // Whisper has no en-GB option but mirrors the prompt's spelling, so prime it with British forms.
+    promptHints:
+      "UK English: we organised and prioritised the programme, analysed the behaviour and realised the colour was centred. " +
+      "Consortia, DeskLoop, Sofee, Bullhorn, Supabase, Groq, Netlify",
   });
 }
 
@@ -135,9 +142,11 @@ async function handleTranscribeChunk(req: Request): Promise<Response> {
     );
   }
 
+  // Whisper's prompt is capped at 224 tokens: hints plus ~300 chars of the previous chunk fits.
+  const context = new URL(req.url).searchParams.get("context")?.trim().slice(-300);
   const rawTranscript = await transcribeAudio(audioFile, apiKey, {
     language: "en",
-    promptHints: dictionary.promptHints,
+    promptHints: context ? `${dictionary.promptHints}. ${context}` : dictionary.promptHints,
   });
 
   let transcript = removeFillers(rawTranscript);

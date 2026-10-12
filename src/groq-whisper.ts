@@ -1,7 +1,8 @@
 import type { GroqWhisperResponse } from "./types.js";
 
 const WHISPER_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
-const MODEL = "whisper-large-v3-turbo";
+// Full large-v3: ~10.3% WER vs 12% for turbo, at ~$0.11/hr instead of $0.04/hr.
+const MODEL = "whisper-large-v3";
 
 export async function transcribeAudio(
   audioBlob: Blob,
