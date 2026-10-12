@@ -22,7 +22,10 @@ function getDictionary() {
       bullhorn: "Bullhorn",
       supabase: "Supabase",
     },
-    promptHints: "Consortia, DeskLoop, Sofee, Bullhorn, Supabase, Groq, Netlify",
+    // Whisper has no en-GB option but mirrors the prompt's spelling, so prime it with British forms.
+    promptHints:
+      "UK English: we organised and prioritised the programme, analysed the behaviour and realised the colour was centred. " +
+      "Consortia, DeskLoop, Sofee, Bullhorn, Supabase, Groq, Netlify",
   });
 }
 
