@@ -481,7 +481,10 @@
         var formData = new FormData();
         formData.append("audio", wavChunks[i], "chunk-" + i + ".wav");
 
-        var res = await fetch("/api/meeting?action=transcribe", {
+        // Feed the tail of the previous chunk as context so Whisper carries
+        // names, spelling and sentence flow across the 2-minute cut.
+        var context = transcripts.length ? transcripts[transcripts.length - 1].slice(-300) : "";
+        var res = await fetch("/api/meeting?action=transcribe&context=" + encodeURIComponent(context), {
           method: "POST",
           headers: { "x-api-key": apiKey },
           body: formData,
