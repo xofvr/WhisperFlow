@@ -3,6 +3,7 @@ import { transcribeAudio } from "../../src/groq-whisper.js";
 import { processWithLLM } from "../../src/groq-llm.js";
 import { loadDictionary, applyDictionary } from "../../src/dictionary.js";
 import { removeFillers } from "../../src/filler-cleanup.js";
+import { checkKey } from "../../src/auth.js";
 import { MEETING_SUMMARY_PROMPT, MEETING_ACTION_ITEMS_PROMPT } from "../../src/prompts/meeting.js";
 import type { GroqChatMessage, MeetingResponse } from "../../src/types.js";
 
@@ -45,13 +46,11 @@ function getEnv(key: string): string | undefined {
  * Authenticate and return the Groq API key, or an error Response.
  */
 function authenticate(req: Request): { apiKey: string } | Response {
-  const secret = getEnv("WHISPERFLOW_SECRET");
-  if (secret) {
-    const provided = req.headers.get("x-api-key");
-    if (provided !== secret) {
-      return errorResponse("Unauthorized", 401);
-    }
+  const user = checkKey(req.headers.get("x-api-key"), getEnv);
+  if (!user) {
+    return errorResponse("Unauthorized", 401);
   }
+  console.log(`[Meeting] Auth passed (${user})`);
   const apiKey = getEnv("GROQ_API_KEY");
   if (!apiKey) {
     return errorResponse("GROQ_API_KEY not configured", 500);

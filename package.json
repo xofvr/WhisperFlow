@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "netlify dev",
     "build": "tsc --noEmit",
-    "deploy": "netlify deploy --prod"
+    "deploy": "netlify deploy --prod",
+    "new-key": "node scripts/new-key.mjs"
   },
   "devDependencies": {
     "@netlify/functions": "^2.8.0",
