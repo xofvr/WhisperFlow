@@ -3,6 +3,7 @@ import { transcribeAudio } from "../../src/groq-whisper.js";
 import { processWithLLM } from "../../src/groq-llm.js";
 import { loadDictionary, applyDictionary } from "../../src/dictionary.js";
 import { removeFillers } from "../../src/filler-cleanup.js";
+import { checkKey } from "../../src/auth.js";
 import { COMMAND_PROMPTS } from "../../src/prompts/commands.js";
 import type { Mode, Tone, EditCommand, GroqChatMessage } from "../../src/types.js";
 
@@ -52,14 +53,11 @@ export default async (req: Request, _context: Context) => {
       });
     }
 
-    const secret = getEnv("WHISPERFLOW_SECRET");
-    if (secret) {
-      const provided = req.headers.get("x-api-key");
-      if (provided !== secret) {
-        return errorResponse("Unauthorized", 401);
-      }
+    const user = checkKey(req.headers.get("x-api-key"), getEnv);
+    if (!user) {
+      return errorResponse("Unauthorized", 401);
     }
-    console.log("[WhisperFlow] Auth passed");
+    console.log(`[WhisperFlow] Auth passed (${user})`);
 
     const apiKey = getEnv("GROQ_API_KEY");
     if (!apiKey) {

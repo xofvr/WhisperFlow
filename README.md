@@ -39,7 +39,8 @@ In the Netlify dashboard (Site settings → Environment variables):
 | Variable | Description |
 |----------|-------------|
 | `GROQ_API_KEY` | Your Groq API key from [console.groq.com](https://console.groq.com) |
-| `WHISPERFLOW_SECRET` | A secret string to protect your endpoint (you choose this) |
+| `WHISPERFLOW_KEYS` | Per-person access keys as `name:sha256` pairs, comma-separated. Run `npm run new-key -- <name>`: it prints the key to give that person and the entry to add here. Netlify only stores the fingerprint; delete an entry to revoke that person. |
+| `WHISPERFLOW_SECRET` | *(Legacy, optional)* a single shared secret. Still accepted alongside `WHISPERFLOW_KEYS`. |
 
 ### 3. Create iPhone Shortcut
 
@@ -58,7 +59,7 @@ See [docs/shortcut-setup.md](docs/shortcut-setup.md) for the step-by-step guide.
 ### `POST /api/transcribe`
 
 **Headers:**
-- `x-api-key`: Your `WHISPERFLOW_SECRET` value
+- `x-api-key`: Your personal key (or the legacy `WHISPERFLOW_SECRET`)
 
 **Body** (JSON — recommended for Apple Shortcuts):
 
